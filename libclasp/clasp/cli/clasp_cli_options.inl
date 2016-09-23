@@ -19,7 +19,10 @@
 //
 /*!
  * \file 
- * Supermacros for describing clasp's options.
+ * \brief Supermacros for describing clasp's options.
+ * \code
+ * OPTION(key, "ext", ARG(...), "help", set, get)
+ * \endcode
  * An option consists of:
  *  - a key  (valid and unique c identifier in 'snake_case')
  *  - a key extension ("[!][,<alias>][,@<level>]") as understood by ProgramOptions::OptionInitHelper
@@ -28,14 +31,13 @@
  *  - a set action to be executed when a value (string) for the option is found in a source
  *  - a get action to be executed when the current value for an option is requested
  *  . 
- * OPTION(key, "ext", ARG(...), "help", set, get).
  * 
  * \note In the implementation of ClaspCliConfig, each key is mapped to an enumeration constant and 
- * the stringified version of key (i.e. #key) is used to identify options. 
+ * the stringified version of key (i.e. \#key) is used to identify options. 
  * Furthermore, the key is also used for generating command-line option names.
  * As a convention, compound keys using 'snake_case' to separate words 
  * are mapped to dash-separated command-line option names. 
- * E.g. an <option_like_this> is mapped to the command-line option "option-like-this".
+ * E.g. an \<option_like_this\> is mapped to the command-line option "option-like-this".
  *
  * \note ClaspCliConfig assumes a certain option order. In particular, context options shall
  * precede all solver/search options, which in turn shall precede global asp/solving options.
@@ -139,15 +141,16 @@ GROUP_BEGIN(SELF)
 OPTION(opt_strategy , ""  , ARG_EXT(arg("<arg>")->implicit("1"), DEFINE_ENUM_MAPPING(MinimizeMode_t::Strategy,\
        MAP("bb", MinimizeMode_t::opt_bb), MAP("usc", MinimizeMode_t::opt_usc))),  "Configure optimization strategy\n" \
        "      %A: {bb|usc}[,<n>]\n" \
-       "        bb : branch and bound based optimization with <n = {0..3}>\n"  \
-       "          1: hierarchical steps\n"                                     \
-       "          2: exponentially increasing steps\n"                         \
-       "          3: exponentially decreasing steps\n"                         \
-       "        usc: unsatisfiable-core based optimization with <n = {0..15}>\n"\
-       "          1: disjoint-core preprocessing\n"                            \
-       "          2: implications instead of equivalences\n"                   \
-       "          4: clauses instead of cardinality constraints (pmres)\n"     \
-       "          8: stratification heuristic for handling weights"           ,\
+       "        bb : model-guided (branch and bound) optimization (<n = {0..3}>)\n"\
+       "          0: default algorithm with minimal steps\n"                      \
+       "          1: hierarchical algorithm and constant steps\n"                 \
+       "          2: hierarchical algorithm and exponentially increasing steps\n" \
+       "          3: hierarchical algorithm and exponentially decreasing steps\n" \
+       "        usc: unsatisfiable-core guided optimization (<n = {0..15}>)\n"    \
+       "          1: enable disjoint-core preprocessing\n"                        \
+       "          2: disable redundant (symmetry) constraints\n"                  \
+       "          4: enable PMRES instead of OLL algorithm\n"                     \
+       "          8: enable stratification heuristic for handling weights"       ,\
        FUN(arg) { MinimizeMode_t::Strategy sc = MinimizeMode_t::opt_bb; uint32 n;\
          return ((SET_LEQ(n, uint32(arg.peek()-'0'), 9u) && arg >> n && (n < 4u || (SET(sc, MinimizeMode_t::opt_usc) && (n -= 4u) < 16u)))\
            || (arg>>sc>>opt(n = 0))) && SET(SELF.optStrat, (uint32)sc) && SET(SELF.optParam, n) && (n < 4u || sc == MinimizeMode_t::opt_usc);},\

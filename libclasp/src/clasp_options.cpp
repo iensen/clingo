@@ -245,6 +245,7 @@ namespace Cli {
 /////////////////////////////////////////////////////////////////////////////////////////
 // Option -> Key mapping
 /////////////////////////////////////////////////////////////////////////////////////////
+/// \cond
 // Valid option keys.
 enum OptionKey {
 	detail__before_options = -1,
@@ -348,6 +349,7 @@ struct ClaspCliConfig::OptIndex {
 	Name2Id* end;
 };
 ClaspCliConfig::OptIndex ClaspCliConfig::index_g(options_g, options_g + detail__num_options+1);
+/// \endcond
 /////////////////////////////////////////////////////////////////////////////////////////
 // Interface to ProgramOptions
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -460,7 +462,7 @@ ConfigIter ClaspCliConfig::getConfig(ConfigKey k) {
 				#include <clasp/cli/clasp_cli_configs.inl>
 				);
 		case config_default: return ConfigIter("/default\0/\0/\0");
-		default            : throw std::logic_error(ClaspErrorString("Invalid config key '%d'", (int)k).c_str());
+		default            : throw std::logic_error(ClaspStringBuffer().appendFormat("Invalid config key '%d'", (int)k).c_str());
 	}
 }
 ConfigIter ClaspCliConfig::getConfig(uint8 key, std::string& tempMem) {
