@@ -68,7 +68,7 @@ public:
     DefMap const &defs() const;
     ~Defines();
 
-private:
+protected:
     std::unordered_map<String, std::tuple<bool, Location, UTerm>> defs_;
 };
 
