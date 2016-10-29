@@ -1,18 +1,18 @@
-// 
+//
 // Copyright (c) 2015-2016, Benjamin Kaufmann
-// 
-// This file is part of Clasp. See http://www.cs.uni-potsdam.de/clasp/ 
-// 
+//
+// This file is part of Clasp. See http://www.cs.uni-potsdam.de/clasp/
+//
 // Clasp is free software; you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
 // the Free Software Foundation; either version 2 of the License, or
 // (at your option) any later version.
-// 
+//
 // Clasp is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
-// 
+//
 // You should have received a copy of the GNU General Public License
 // along with Clasp; if not, write to the Free Software
 // Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
@@ -33,7 +33,7 @@ namespace Clasp { namespace {
 		OP op_;
 	};
 	struct Nop { void operator()() const {} };
-	struct Inc { Inc(uint32& e) : epoch_(&e) {} void operator()() const { ++*epoch_; } uint32* epoch_; };
+	struct Inc { Inc(LitVec::size_type& e) : epoch_(&e) {} void operator()() const { ++*epoch_; } LitVec::size_type* epoch_; };
 	typedef Scoped<Potassco::AbstractPropagator, ClingoPropagatorLock, &ClingoPropagatorLock::lock, &ClingoPropagatorLock::unlock, Inc> ScopedLock;
 	typedef Scoped<ClingoPropagator, ClingoPropagatorLock, &ClingoPropagatorLock::unlock, &ClingoPropagatorLock::lock, Nop> ScopedUnlock;
 }
@@ -62,11 +62,15 @@ public:
 		CLASP_ASSERT_CONTRACT_MSG(dl <= s_->decisionLevel(), "Invalid decision level");
 		return encodeLit(dl ? s_->decision(dl) : lit_true());
 	}
-	
+
 	// Potassco::AbstractSolver
 	virtual Potassco::Id_t id() const { return s_->id(); }
 	virtual bool addClause(const Potassco::LitSpan& clause, Potassco::Clause_t prop);
 	virtual bool propagate();
+	virtual Lit  addVariable();
+	virtual bool hasWatch(Lit lit) const;
+	virtual void addWatch(Lit lit);
+	virtual void removeWatch(Lit lit);
 protected:
 	typedef ClingoPropagator::State State;
 	ClingoPropagator* ctx_;
@@ -83,8 +87,31 @@ bool ClingoPropagator::Control::propagate() {
 	ScopedUnlock unlocked(ctx_->lock_, ctx_);
 	if (s_->hasConflict())    { return false; }
 	if (s_->queueSize() == 0) { return true;  }
-	uint32 epoch = ctx_->epoch_;
+	ClingoPropagator::size_t epoch = ctx_->epoch_;
 	return (state_ & state_prop) != 0u && s_->propagateUntil(unlocked.obj_) && epoch == ctx_->epoch_;
+}
+Potassco::Lit_t ClingoPropagator::Control::addVariable() {
+	CLASP_ASSERT_CONTRACT_MSG(!s_->hasConflict(), "Invalid addVariable() on conflicting assignment");
+	ScopedUnlock unlocked(ctx_->lock_, ctx_);
+	return encodeLit(posLit(s_->pushAuxVar()));
+}
+bool ClingoPropagator::Control::hasWatch(Lit_t lit) const {
+	ScopedUnlock unlocked(ctx_->lock_, ctx_);
+	return Control::hasLit(lit) && s_->hasWatch(decodeLit(lit), ctx_);
+}
+void ClingoPropagator::Control::addWatch(Lit_t lit) {
+	ScopedUnlock unlocked(ctx_->lock_, ctx_);
+	CLASP_ASSERT_CONTRACT_MSG(Control::hasLit(lit), "Invalid literal");
+	Literal p = decodeLit(lit);
+	if (!s_->hasWatch(p, ctx_)) {
+		s_->addWatch(p, ctx_);
+	}
+}
+void ClingoPropagator::Control::removeWatch(Lit_t lit) {
+	ScopedUnlock unlocked(ctx_->lock_, ctx_);
+	if (Control::hasLit(lit)) {
+		s_->removeWatch(decodeLit(lit), ctx_);
+	}
 }
 /////////////////////////////////////////////////////////////////////////////////////////
 // ClingoPropagator
@@ -93,12 +120,12 @@ bool ClingoPropagator::Control::propagate() {
 static const uint32 ccFlags_s[2] = {
 	/* 0: learnt */ Clasp::ClauseCreator::clause_not_sat | Clasp::ClauseCreator::clause_int_lbd,
 	/* 1: static */ ClauseCreator::clause_no_add | ClauseCreator::clause_explicit
-};		
+};
 ClingoPropagator::ClingoPropagator(const LitVec& watches, Potassco::AbstractPropagator& cb, ClingoPropagatorLock* ctrl)
 	: watches_(watches)
 	, call_(&cb)
 	, lock_(ctrl)
-	, init_(0), level_(0), prop_(0), epoch_(0) {
+	, init_(0), prop_(0), epoch_(0), level_(0) {
 }
 uint32 ClingoPropagator::priority() const { return static_cast<uint32>(priority_class_general); }
 
@@ -113,7 +140,7 @@ bool ClingoPropagator::init(Solver& s) {
 	for (size_t max = watches_.size(); init_ != max; ++init_) {
 		Literal p = watches_[init_];
 		if (s.value(p.var()) == value_free || s.level(p.var()) > s.rootLevel()) {
-			s.addWatch(p, this, init_);
+			s.addWatch(p, this, toU32(init_));
 		}
 		else if (s.isTrue(p)) {
 			ClingoPropagator::propagate(s, p, ignore);
@@ -158,44 +185,71 @@ bool ClingoPropagator::propagateFixpoint(Clasp::Solver& s, Clasp::PostPropagator
 }
 
 void ClingoPropagator::toClause(Solver& s, const Potassco::LitSpan& clause, Potassco::Clause_t prop) {
-	CLASP_ASSERT_CONTRACT_MSG(clause_.empty(), "Assignment not propagated");
+	CLASP_ASSERT_CONTRACT_MSG(todo_.empty(), "Assignment not propagated");
+	Literal max;
+	LitVec& mem = todo_.mem;
 	for (const Potassco::Lit_t* it = Potassco::begin(clause); it != Potassco::end(clause); ++it) {
-		clause_.push_back(decodeLit(*it));
+		Literal p = decodeLit(*it);
+		if (max < p) { max = p; }
+		mem.push_back(p);
 	}
-	if (Potassco::Clause_t::isVolatile(prop) && !isSentinel(s.sharedContext()->stepLiteral())) {
-		clause_.push_back(~s.sharedContext()->stepLiteral());
+	if (aux_ < max) { aux_ = max; }
+	if ((Potassco::Clause_t::isVolatile(prop) || s.auxVar(max.var())) && !isSentinel(s.sharedContext()->stepLiteral())) {
+		mem.push_back(~s.sharedContext()->stepLiteral());
 	}
-	ClauseCreator::prepare(s, clause_, Clasp::ClauseCreator::clause_force_simplify, Constraint_t::Other);
-	if (clause_.empty()) { clause_.push_back(lit_false()); }
-	clause_.push_back(Literal::fromRep(static_cast<uint32>(prop))); // remember properties
+	todo_.clause = ClauseCreator::prepare(s, mem, Clasp::ClauseCreator::clause_force_simplify, Constraint_t::Other);
+	todo_.flags  = ccFlags_s[int(Potassco::Clause_t::isStatic(prop))];
 }
 bool ClingoPropagator::addClause(Solver& s, uint32 st) {
-	if (s.hasConflict()) { clause_.clear(); return false; }
-	if (clause_.empty()) { return true; }
-	assert(clause_.size() > 1);
-	uint32 impLevel = clause_.size() > 2 ? ClauseCreator::watchOrder(s, clause_[1]) : 0;
+	if (s.hasConflict()) { todo_.clear(); return false; }
+	if (todo_.empty())   { return true; }
+	const ClauseRep& clause = todo_.clause;
+	Literal first   = clause.size > 0 ? clause.lits[0] : lit_false();
+	uint32 impLevel = clause.size > 1 ? ClauseCreator::watchOrder(s, clause.lits[1]) : 0;
 	if (impLevel < s.decisionLevel() && s.isUndoLevel()) {
 		if ((st & state_ctrl) != 0u) { return false; }
 		if ((st & state_prop) != 0u) { ClingoPropagator::reset(); cancelPropagation(); }
 		s.undoUntil(impLevel);
 	}
-	bool isStatic = Potassco::Clause_t::isStatic(static_cast<Potassco::Clause_t>(clause_.back().rep()));
-	clause_.pop_back();
-	if (!s.isFalse(clause_[0]) || isStatic || s.force(clause_[0], this)) {
-		ClauseCreator::Result res = ClauseCreator::create(s, ClauseRep::prepared(&clause_[0], clause_.size(), Constraint_t::Other), ccFlags_s[int(isStatic)]);
-		if (res.local && isStatic) { db_.push_back(res.local); }
+	bool local = (todo_.flags & ClauseCreator::clause_no_add) != 0;
+	if (!s.isFalse(first) || local || s.force(first, this)) {
+		ClauseCreator::Result res = ClauseCreator::create(s, clause, todo_.flags);
+		if (res.local && local) { db_.push_back(res.local); }
 	}
-	clause_.clear();
+	todo_.clear();
 	return !s.hasConflict();
 }
 
 void ClingoPropagator::reason(Solver&, Literal p, LitVec& r) {
-	for (LitVec::const_iterator it = clause_.begin() + (p == clause_[0]), end = clause_.end(); it != end; ++it) {
-		r.push_back(~*it);
+	if (!todo_.empty() && todo_.mem[0] == p) {
+		for (LitVec::const_iterator it = todo_.mem.begin() + 1, end = todo_.mem.end(); it != end; ++it) {
+			r.push_back(~*it);
+		}
 	}
 }
 
 bool ClingoPropagator::simplify(Solver& s, bool) {
+	if (!s.validVar(aux_.var())) {
+		ClauseDB::size_type i, j, end = db_.size();
+		LitVec cc;
+		Var last = s.numVars();
+		aux_ = lit_true();
+		for (i = j = 0; i != end; ++i) {
+			db_[j++] = db_[i];
+			ClauseHead* c = db_[i]->clause();
+			if (c && c->aux()) {
+				cc.clear();
+				c->toLits(cc);
+				Literal x = *std::max_element(cc.begin(), cc.end());
+				if (x.var() > last) {
+					c->destroy(&s, true);
+					--j;
+				}
+				else if (aux_ < x) { aux_ = x; }
+			}
+		}
+		db_.erase(db_.begin()+j, db_.end());
+	}
 	simplifyDB(s, db_, false);
 	return false;
 }

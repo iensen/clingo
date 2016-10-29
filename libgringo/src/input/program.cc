@@ -98,7 +98,7 @@ void Program::rewrite(Defines &defs, Logger &log) {
             args.emplace_back(gen.uniqueVar(param.first, 0, "#Inc"));
             incDefs.add(param.first, param.second, get_clone(args.back()), false, log);
         }
-        sigs_.push(Sig(block.name, args.size(), false));
+        sigs_.push(Sig(block.name, static_cast<uint32_t>(args.size()), false));
         UTerm blockTerm(args.empty()
             ? (UTerm)make_locatable<ValTerm>(block.loc, Symbol::createId(block.name))
             : make_locatable<FunctionTerm>(block.loc, block.name, get_clone(args)));
@@ -214,6 +214,10 @@ Ground::Program Program::toGround(DomainData &domains, Logger &log) {
     ToGroundArg arg(auxNames_, domains);
     Ground::SEdbVec edb;
     for (auto &block : blocks_) {
+        for (auto &x : block.edb->second) {
+            auto sig = x.sig();
+            if (sig.sign()) { gn(sig); }
+        }
         edb.emplace_back(block.edb);
         for (auto &x : block.stms) {
             x->getNeg(gn);

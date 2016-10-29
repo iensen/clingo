@@ -178,6 +178,10 @@ bool ClingoControl::update() {
         if (!clasp_->ok()) { return false; }
     }
     if (!grounded) {
+        if (!initialized_) {
+            out_->init(incremental_);
+            initialized_ = true;
+        }
         out_->beginStep();
         grounded = true;
     }
@@ -210,12 +214,12 @@ void ClingoControl::ground(Gringo::Control::GroundVec const &parts, Gringo::Cont
 
 void ClingoControl::main() {
     if (scripts_.callable("main")) {
-        out_->init(true);
+        incremental_ = true;
         clasp_->enableProgramUpdates();
         scripts_.main(*this);
     }
     else {
-        out_->init(false);
+        incremental_ = false;
         claspConfig_.releaseOptions();
         Gringo::Control::GroundVec parts;
         parts.emplace_back("base", Gringo::SymVec{});
@@ -325,7 +329,7 @@ Gringo::SolveFuture *ClingoControl::solveAsync(ModelHandler mh, FinishHandler fh
 #endif
 }
 void ClingoControl::interrupt() {
-    clasp_->interrupt(SIGUSR1);
+    clasp_->interrupt(30);
 }
 bool ClingoControl::blocked() {
     return clasp_->solving();
@@ -381,6 +385,10 @@ Gringo::SolveResult ClingoControl::solve(ModelHandler h, Assumptions &&ass) {
     auto ret = clingoMode_ ? convert(clasp_->solve(nullptr, toClaspAssumptions(std::move(ass)))) : Gringo::SolveResult(Gringo::SolveResult::Unknown, false, false);
     postSolve(*clasp_);
     return ret;
+}
+
+void *ClingoControl::claspFacade() {
+    return clasp_;
 }
 
 void ClingoControl::registerPropagator(std::unique_ptr<Gringo::Propagator> p, bool sequential) {
@@ -449,9 +457,6 @@ union SymbolicAtomOffset {
     SymbolicAtomOffset(uint32_t domain_offset, bool domain_advance, uint32_t atom_offset, bool atom_advance)
     : data{domain_offset, domain_advance, atom_offset, atom_advance} { }
     clingo_symbolic_atom_iterator_t repr;
-    friend bool operator==(SymbolicAtomOffset const &a, SymbolicAtomOffset const &b) {
-        return a.data.domain_offset == b.data.domain_offset && a.data.atom_offset == b.data.atom_offset;
-    }
     struct {
         clingo_symbolic_atom_iterator_t domain_offset : 31;
         clingo_symbolic_atom_iterator_t domain_advance : 1;
@@ -459,6 +464,10 @@ union SymbolicAtomOffset {
         clingo_symbolic_atom_iterator_t atom_advance : 1;
     } data;
 };
+
+bool operator==(SymbolicAtomOffset const &a, SymbolicAtomOffset const &b) {
+	return a.data.domain_offset == b.data.domain_offset && a.data.atom_offset == b.data.atom_offset;
+}
 
 SymbolicAtomOffset &toOffset(clingo_symbolic_atom_iterator_t &it) {
     return reinterpret_cast<SymbolicAtomOffset &>(it);
@@ -649,7 +658,7 @@ void ClingoSolveFuture::cancel() { future.cancel(); }
 ClingoLib::ClingoLib(Gringo::Scripts &scripts, int argc, char const * const *argv, Gringo::Logger::Printer printer, unsigned messageLimit)
         : ClingoControl(scripts, true, &clasp_, claspConfig_, nullptr, nullptr, printer, messageLimit) {
     using namespace ProgramOptions;
-    OptionContext allOpts("<pyclingo>");
+    OptionContext allOpts("<libclingo>");
     initOptions(allOpts);
     ParsedValues values = parseCommandArray(argv, argc, allOpts, false, parsePositional);
     ParsedOptions parsed;
@@ -659,7 +668,6 @@ ClingoLib::ClingoLib(Gringo::Scripts &scripts, int argc, char const * const *arg
     clasp_.ctx.setEventHandler(this);
     Clasp::Asp::LogicProgram* lp = &clasp_.startAsp(claspConfig_, true);
     parse({}, grOpts_, lp, false);
-    out_->init(true);
 }
 
 
@@ -770,7 +778,7 @@ struct Clingo::Control::Impl {
 };
 
 Clingo::Control::Control(StringSpan args, Logger logger, unsigned message_limit)
-: impl_(Gringo::gringo_make_unique<Clingo::Control::Impl>(logger))
+: impl_(new Clingo::Control::Impl(logger))
 {
     Gringo::handleCError(clingo_control_new(args.begin(), args.size(), [](clingo_warning_t code, char const *msg, void *data) {
         try { (*static_cast<Logger*>(data))(static_cast<WarningCode>(code), msg); }

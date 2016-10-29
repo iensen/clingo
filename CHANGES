@@ -1,3 +1,23 @@
+clingo 5.1.0
+  * update to clasp 3.2.1
+  * add interface to add variables during propagation
+  * add interface to inspect ground rules (C/C++ only)
+  * add experimental interface to access clasp facade (C/C++ only)
+  * fixed smodels output (--output=smodels)
+clingo 5.0.0
+  * cleanup of python and lua API (breaks backwards compatibility)
+  * added new aspif output format replacing the old smodels format
+  * added input language support for clasp features
+    * #edge directives to add acyclicity constraints
+    * #project directives for enumeration of projected models
+    * #heuristic directives to steer clasp's search
+  * added theory atoms to write aggregate like constructs
+  * added stable C API documented with doxygen
+  * added experimental C++ API based on C API
+  * added theory propagator interface to clingo APIs
+  * added support for compilation with Visual Studio 2015
+  * improved data structures to reduce memory consumption on typical input
+  * updated to clasp version 3.2.0 + patches
 gringo/clingo 4.5.4
   * fixed bug when creating multiple Control objects
     (affects lua only)

@@ -272,12 +272,14 @@ public:
     Gringo::TheoryData const &theory() const override { return out_->data.theoryInterface(); }
     void registerPropagator(Gringo::UProp p, bool sequential) override;
     void interrupt() override;
+    void *claspFacade() override;
     Gringo::Backend *backend() override;
     Potassco::Atom_t addProgramAtom() override;
     Gringo::Logger &logger() override { return logger_; }
     void beginAdd() override { parse(); }
     void add(clingo_ast_statement_t const &stm) override { Gringo::Input::parseStatement(*pb_, logger_, stm); }
     void endAdd() override { defs_.init(logger_); parsed = true; }
+    void registerObserver(Gringo::UBackend obs) override { out_->registerObserver(std::move(obs)); }
 
     // }}}2
 
@@ -307,8 +309,9 @@ public:
     bool verbose_               = false;
     bool parsed                 = false;
     bool grounded               = false;
-    bool incremental            = false;
+    bool incremental_           = true;
     bool configUpdate_          = false;
+    bool initialized_           = false;
 };
 
 // {{{1 declaration of ClingoModel
@@ -325,7 +328,7 @@ public:
     Gringo::SymSpan atoms(unsigned atomset) const override {
         atms_ = out().atoms(atomset, [this](unsigned uid) { return model_->isTrue(lp().getLiteral(uid)); });
         if (atomset & clingo_show_type_extra){
-            ctl_.addToModel(*model_, atomset & clingo_show_type_complement, atms_);
+            ctl_.addToModel(*model_, (atomset & clingo_show_type_complement) != 0, atms_);
         }
         return Potassco::toSpan(atms_);
     }

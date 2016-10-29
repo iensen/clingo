@@ -35,6 +35,7 @@
 #include <gringo/scripts.hh>
 #include <gringo/version.hh>
 #include <gringo/control.hh>
+#include <clingo.hh>
 #include <climits>
 #include <iostream>
 #include <stdexcept>
@@ -140,6 +141,10 @@ struct IncrementalControl : Gringo::Control, Gringo::GringoModule {
             parsed = false;
         }
         if (!grounded) {
+            if (!initialized_) {
+                initialized_ = true;
+                out.init(incremental_);
+            }
             out.beginStep();
             grounded = true;
         }
@@ -188,6 +193,9 @@ struct IncrementalControl : Gringo::Control, Gringo::GringoModule {
     void interrupt() override {
         throw std::runtime_error("interrupting not supported in gringo");
     }
+    void *claspFacade() override {
+        return nullptr;
+    }
     void beginAdd() override {
         parse();
     }
@@ -196,6 +204,9 @@ struct IncrementalControl : Gringo::Control, Gringo::GringoModule {
     }
     void endAdd() override {
         defs.init(logger_);
+    }
+    void registerObserver(std::unique_ptr<Potassco::AbstractProgram> prg) override {
+        out.registerObserver(std::move(prg));
     }
     Gringo::SolveFuture *solveAsync(ModelHandler, FinishHandler, Assumptions &&) override { throw std::runtime_error("asynchronous solving not supported"); }
     Potassco::AbstractStatistics *statistics() override { throw std::runtime_error("statistics not supported (yet)"); }
@@ -231,6 +242,8 @@ struct IncrementalControl : Gringo::Control, Gringo::GringoModule {
     std::unique_ptr<Gringo::Input::NongroundProgramBuilder> builder;
     bool                                   parsed = false;
     bool                                   grounded = false;
+    bool initialized_ = false;
+    bool incremental_ = true;
 };
 #undef LOG
 
@@ -369,13 +382,13 @@ struct GringoApp : public ProgramOptions::Application {
         using namespace Gringo;
         IncrementalControl inc(out, input_, grOpts_);
         if (inc.scripts.callable("main")) {
-            out.init(true);
+            inc.incremental_ = true;
             inc.scripts.main(inc);
         }
         else {
-            out.init(false);
             Gringo::Control::GroundVec parts;
             parts.emplace_back("base", SymVec{});
+            inc.incremental_ = false;
             inc.ground(parts, nullptr);
             inc.solve(nullptr, {});
         }
@@ -410,3 +423,8 @@ int main(int argc, char **argv) {
     return app.main(argc, argv);
 }
 
+Clingo::Control::Control(StringSpan, Logger, unsigned)
+: impl_(nullptr)
+{
+	throw std::logic_error("cannot happen");
+}

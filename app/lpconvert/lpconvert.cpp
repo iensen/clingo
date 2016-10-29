@@ -1,7 +1,7 @@
 // 
 // Copyright (c) 2015, Benjamin Kaufmann
 // 
-// This file is part of Potassco. See http://potassco.sourceforge.net/
+// This file is part of Potassco.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -24,7 +24,7 @@
 #include <fstream>
 #include <iostream>
 #include <cctype>
-
+#include <cstdlib>
 using namespace ProgramOptions;
 
 class LpConvert : public ProgramOptions::Application {

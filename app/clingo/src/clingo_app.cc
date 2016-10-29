@@ -28,7 +28,6 @@
 #include "clingo_app.hh"
 #include <clasp/parser.h>
 #include <climits>
-#include <unistd.h>
 
 using namespace Clasp;
 using namespace Clasp::Cli;
@@ -136,8 +135,8 @@ Output* ClingoApp::createOutput(ProblemType f) {
 
 void ClingoApp::printHelp(const ProgramOptions::OptionContext& root) {
     BaseType::printHelp(root);
-    printf("\nclingo is part of Potassco: %s\n", "http://potassco.sourceforge.net/#clingo");
-    printf("Get help/report bugs via : http://sourceforge.net/projects/potassco/support\n");
+    printf("\nclingo is part of Potassco: %s\n", "https://potassco.org/clingo");
+    printf("Get help/report bugs via : https://potassco.org/support\n");
     fflush(stdout);
 }
 

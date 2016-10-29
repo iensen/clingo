@@ -1,18 +1,18 @@
-// 
+//
 // Copyright (c) 2006-2012, Benjamin Kaufmann
-// 
-// This file is part of Clasp. See http://www.cs.uni-potsdam.de/clasp/ 
-// 
+//
+// This file is part of Clasp. See http://www.cs.uni-potsdam.de/clasp/
+//
 // Clasp is free software; you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
 // the Free Software Foundation; either version 2 of the License, or
 // (at your option) any later version.
-// 
+//
 // Clasp is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
-// 
+//
 // You should have received a copy of the GNU General Public License
 // along with Clasp; if not, write to the Free Software
 // Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
@@ -34,10 +34,12 @@
 
 #if defined( __linux__ )
 #include <fpu_control.h>
+#if defined(_FPU_EXTENDED) && defined(_FPU_SINGLE) && defined(_FPU_DOUBLE)
 #define FPU_SWITCH_DOUBLE(oldW) _FPU_GETCW(oldW);\
 	unsigned __t = ((oldW) & ~_FPU_EXTENDED & ~_FPU_SINGLE) | _FPU_DOUBLE;\
 	_FPU_SETCW(__t)
 #define FPU_RESTORE_DOUBLE(oldW) _FPU_SETCW(oldW)
+#endif
 #elif defined (_MSC_VER) && !defined(_WIN64)
 #include <float.h>
 #define FPU_SWITCH_DOUBLE(oldW) \
@@ -49,7 +51,7 @@
 #endif
 
 #if !defined(FPU_SWITCH_DOUBLE)
-#define FPU_SWITCH_DOUBLE(x) 
+#define FPU_SWITCH_DOUBLE(x)
 #define FPU_RESTORE_DOUBLE(x)
 #endif
 
@@ -59,8 +61,10 @@ namespace Clasp {
 /////////////////////////////////////////////////////////////////////////////////////////
 unsigned doubleMode_g = ((unsigned)(sizeof(void*)*CHAR_BIT)) < 64;
 double shutdownTime_g;
-inline bool isStdIn(const std::string& in)  { return in == "-" || in == "stdin"; }
-inline bool isStdOut(const std::string& out){ return out == "-" || out == "stdout"; }
+static const std::string stdinStr  = "stdin";
+static const std::string stdoutStr = "stdout";
+inline bool isStdIn(const std::string& in)   { return in == "-" || in == stdinStr; }
+inline bool isStdOut(const std::string& out) { return out == "-" || out == stdoutStr; }
 /////////////////////////////////////////////////////////////////////////////////////////
 // ClaspAppOptions
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -72,7 +76,7 @@ void ClaspAppOptions::initOptions(ProgramOptions::OptionContext& root) {
 	using namespace ProgramOptions;
 	OptionGroup basic("Basic Options");
 	basic.addOptions()
-		("quiet,q"    , notify(this, &ClaspAppOptions::mappedOpts)->implicit("2,2,2")->arg("<levels>"), 
+		("quiet,q"    , notify(this, &ClaspAppOptions::mappedOpts)->implicit("2,2,2")->arg("<levels>"),
 		 "Configure printing of models, costs, and calls\n"
 		 "      %A: <mod>[,<cost>][,<call>]\n"
 		 "        <mod> : print {0=all|1=last|2=no} models\n"
@@ -131,7 +135,7 @@ bool ClaspAppOptions::validateOptions(const ProgramOptions::ParsedOptions&) {
 ClaspAppBase::ClaspAppBase() { }
 ClaspAppBase::~ClaspAppBase(){ }
 const int* ClaspAppBase::getSignals() const {
-	static const int signals[] = { 
+	static const int signals[] = {
 		SIGINT, SIGTERM
 #if !defined (_WIN32)
 		, SIGUSR1, SIGUSR2, SIGQUIT, SIGHUP, SIGXCPU, SIGXFSZ
@@ -218,7 +222,10 @@ void ClaspAppBase::shutdown() {
 }
 
 void ClaspAppBase::run() {
-	if (out_.get()) { out_->run(getName(), getVersion(), &claspAppOpts_.input[0], &claspAppOpts_.input[0] + claspAppOpts_.input.size()); }
+	if (out_.get()) {
+		Potassco::Span<std::string> in = !claspAppOpts_.input.empty() ? Potassco::toSpan(claspAppOpts_.input) : Potassco::toSpan(&stdinStr, 1);
+		out_->run(getName(), getVersion(), Potassco::begin(in), Potassco::end(in));
+	}
 	try        { run(*clasp_); }
 	catch(...) {
 		try { blockSignals(); setExitCode(E_ERROR); throw; }
@@ -384,19 +391,20 @@ void ClaspAppBase::writeNonHcfs(const PrgDepGraph& graph) const {
 		cnf.close();
 	}
 }
-std::istream& ClaspAppBase::getStream() {
-	ProgramOptions::StringSeq& input = claspAppOpts_.input;
-	if (input.empty() || isStdIn(input[0])) {
-		input.resize(1, "stdin");
-		return std::cin;
+std::istream& ClaspAppBase::getStream(bool reopen) const {
+	static std::ifstream file;
+	static bool isOpen = false;
+	if (!isOpen || reopen) {
+		file.close();
+		isOpen = true;
+		if (!claspAppOpts_.input.empty() && !isStdIn(claspAppOpts_.input[0])) {
+			file.open(claspAppOpts_.input[0].c_str());
+			if (!file.is_open()) {
+				throw std::runtime_error(ClaspStringBuffer().appendFormat("Can not read from '%s'", claspAppOpts_.input[0].c_str()).c_str());
+			}
+		}
 	}
-	else {
-		static std::ifstream file;
-		if (file.is_open()) return file;
-		file.open(input[0].c_str());
-		if (!file) { throw std::runtime_error("Can not read from '"+input[0]+"'");  }
-		return file;
-	}
+	return file.is_open() ? file : std::cin;
 }
 
 // Creates output object suitable for given input format
@@ -434,7 +442,7 @@ Output* ClaspAppBase::createOutput(ProblemType f) {
 	}
 	return out.release();
 }
-void ClaspAppBase::storeCommandArgs(const ProgramOptions::ParsedValues&) { 
+void ClaspAppBase::storeCommandArgs(const ProgramOptions::ParsedValues&) {
 	/* We don't need the values */
 }
 void ClaspAppBase::handleStartOptions(ClaspFacade& clasp) {
@@ -466,10 +474,10 @@ void ClaspAppBase::handleStartOptions(ClaspFacade& clasp) {
 	}
 }
 bool ClaspAppBase::handlePostGroundOptions(ProgramBuilder& prg) {
-	if (!claspAppOpts_.onlyPre) { 
+	if (!claspAppOpts_.onlyPre) {
 		if (lemmaIn_.get()) { lemmaIn_->parse(); }
 		if (logger_.get())  { logger_->startStep(prg, clasp_->incremental()); }
-		return true; 
+		return true;
 	}
 	prg.endProgram();
 	if (prg.type() == Problem_t::Asp) {
@@ -512,8 +520,8 @@ void ClaspApp::run(ClaspFacade& clasp) {
 
 void ClaspApp::printHelp(const ProgramOptions::OptionContext& root) {
 	ClaspAppBase::printHelp(root);
-	printf("\nclasp is part of Potassco: %s\n", "http://potassco.sourceforge.net/#clasp");
-	printf("Get help/report bugs via : http://sourceforge.net/projects/potassco/support\n");
+	printf("\nclasp is part of Potassco: %s\n", "https://potassco.org/clasp/");
+	printf("Get help/report bugs via : %s\n", "https://potassco.org/support/");
 	fflush(stdout);
 }
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -644,7 +652,7 @@ void WriteCnf::write(Var maxVar, const ShortImplicationsGraph& g) {
 	for (Var v = 1; v <= maxVar; ++v) {
 		g.forEach(posLit(v), *this);
 		g.forEach(negLit(v), *this);
-	}	
+	}
 }
 void WriteCnf::write(Literal u) {
 	fprintf(str_, "%d 0\n", toInt(u));

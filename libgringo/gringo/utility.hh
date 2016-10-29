@@ -30,6 +30,7 @@
 #include <unordered_map>
 #include <algorithm>
 #include <cassert>
+#include <iterator>
 #include <potassco/basic_types.h>
 
 namespace Gringo {
@@ -284,7 +285,7 @@ void sort_unique(T &vec) {
 class CountBuf : public std::streambuf {
 public:
     CountBuf() = default;
-    size_t count() const { return count_; }
+    size_t count() const { return static_cast<size_t>(count_); }
 protected:
     int_type overflow(int_type ch) override {
         count_++;
@@ -295,7 +296,7 @@ protected:
         return count;
     }
 private:
-    size_t count_ = 0;
+    std::streamsize count_ = 0;
 };
 
 class CountStream : public std::ostream {
@@ -321,8 +322,8 @@ public:
     }
     pos_type seekpos(pos_type off, std::ios_base::openmode which) override {
         if (off >= 0 && off <= size()) {
-            if (which & std::ios_base::in) { gbump(off - offset(which)); }
-            else                           { pbump(off - offset(which)); }
+            if (which & std::ios_base::in) { gbump(static_cast<int>(off - offset(which))); }
+            else                           { pbump(static_cast<int>(off - offset(which))); }
             return off;
         }
         return std::streambuf::seekpos(off, which);
@@ -674,7 +675,8 @@ T get_clone(T const &x) {
 
 template <class S, class T, class U>
 void print_comma(S &out, T const &x, const char *sep, U const &f) {
-    using namespace std;
+	using std::begin;
+	using std::end;
     auto it(begin(x)), ie(end(x));
     if (it != ie) {
         f(out, *it);
@@ -694,9 +696,9 @@ void print_comma(S &out, T const &x, const char *sep) {
 
 template <class T>
 inline void cross_product(std::vector<std::vector<T>> &vec) {
-    unsigned size = 1;
+    size_t size = 1;
     for (auto &x : vec) {
-        unsigned n = x.size();
+        size_t n = x.size();
         if (n == 0) {
             vec.clear();
             return;

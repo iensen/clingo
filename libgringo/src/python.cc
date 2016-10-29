@@ -65,7 +65,7 @@
 #define PY_CATCH(ret) \
 } \
 catch (std::bad_alloc const &e) { PyErr_SetString(PyExc_MemoryError, e.what()); } \
-catch (PyException const &e)    { } \
+catch (PyException const &)     { } \
 catch (std::exception const &e) { PyErr_SetString(PyExc_RuntimeError, e.what()); } \
 catch (...)                     { PyErr_SetString(PyExc_RuntimeError, "unknown error"); } \
 return (ret)
@@ -590,7 +590,7 @@ Object pyExec(char const *str, char const *filename, PyObject *globals, PyObject
 
 #define PY_HANDLE(func, msg) \
 } \
-catch (PyException const &e) { handleError(func, msg); throw std::logic_error("cannot happen"); }
+catch (PyException const &) { handleError(func, msg); throw std::logic_error("cannot happen"); }
 
 template <class T>
 Object doCmp(T const &a, T const &b, int op) {
@@ -637,35 +637,64 @@ void handleError(char const *loc, char const *msg) {
     handleError(l, msg);
 }
 
-namespace Detail {
+namespace PythonDetail {
+
+// macros
+
+#define CHECK_EXPRESSION(E) decltype(static_cast<void>(E))
+
+#define WRAP_FUNCTION(F) \
+template <class B, class Enable = void> \
+struct Get_##F { \
+    static constexpr std::nullptr_t value = nullptr; \
+}; \
+template <class B> \
+struct Get_##F<B, CHECK_EXPRESSION(&B::F)>
+
+#define BEGIN_PROTOCOL(F) \
+template <class B, class Enable = void> \
+struct Get_##F { \
+    static constexpr std::nullptr_t value = nullptr; \
+    static constexpr bool has_protocol = false; \
+}; \
+template <class B> \
+struct Get_##F<B, CHECK_EXPRESSION(&B::F)> { \
+    static constexpr bool has_protocol = true;
+
+#define NEXT_PROTOCOL(G,F) \
+}; \
+template <class B, class Enable = void> \
+struct Get_##F { \
+    static constexpr std::nullptr_t value = nullptr; \
+    static constexpr bool has_protocol = Get_##G<B>::has_protocol; \
+}; \
+template <class B> \
+struct Get_##F<B, CHECK_EXPRESSION(&B::F)> { \
+    static constexpr bool has_protocol = true;
+
+#define END_PROTOCOL(G, F, T) \
+}; \
+template <class B, class Enable = void> \
+struct Get_##F { \
+    static constexpr T* value = nullptr; \
+}; \
+template <class B> \
+struct Get_##F<B, typename std::enable_if<Get_##G<B>::has_protocol>::type> { \
+    static T value[]; \
+}; \
+template <class B> \
+T Get_##F<B, typename std::enable_if<Get_##G<B>::has_protocol>::type>::value[] =
 
 // object protocol
 
-template <class>
-struct Void {
-    using Type = void;
-};
-
-template <class B, class Enable = void>
-struct GetDestructor {
-    static constexpr std::nullptr_t value = nullptr;
-};
-
-template <class B>
-struct GetDestructor<B, typename Void<decltype(&B::tp_dealloc)>::Type> {
+WRAP_FUNCTION(tp_dealloc) {
     static void value(PyObject *self) {
         reinterpret_cast<B*>(self)->tp_dealloc();
         B::type.tp_free(self);
     };
 };
 
-template <class B, class Enable = void>
-struct GetRepr {
-    static constexpr std::nullptr_t value = nullptr;
-};
-
-template <class B>
-struct GetRepr<B, typename Void<decltype(&B::tp_repr)>::Type> {
+WRAP_FUNCTION(tp_repr) {
     static PyObject *value(PyObject *self) {
         PY_TRY { return reinterpret_cast<B*>(self)->tp_repr().release(); }
         PY_CATCH(nullptr);
@@ -673,36 +702,24 @@ struct GetRepr<B, typename Void<decltype(&B::tp_repr)>::Type> {
 };
 
 template <class B, class Enable = void>
-struct GetStr : GetRepr<B, void> { };
+struct Get_tp_str : Get_tp_repr<B, void> { };
 
 template <class B>
-struct GetStr<B, typename Void<decltype(&B::tp_str)>::Type> {
+struct Get_tp_str<B, CHECK_EXPRESSION(&B::tp_str)> {
     static PyObject *value(PyObject *self) {
         PY_TRY { return reinterpret_cast<B*>(self)->tp_str().release(); }
         PY_CATCH(nullptr);
     };
 };
 
-template <class B, class Enable = void>
-struct GetHash {
-    static constexpr std::nullptr_t value = nullptr;
-};
-
-template <class B>
-struct GetHash<B, typename Void<decltype(&B::tp_hash)>::Type> {
+WRAP_FUNCTION(tp_hash) {
     static long value(PyObject *self) {
         PY_TRY { return reinterpret_cast<B*>(self)->tp_hash(); }
         PY_CATCH(-1);
     };
 };
 
-template <class B, class Enable = void>
-struct GetRichCompare {
-    static constexpr std::nullptr_t value = nullptr;
-};
-
-template <class B>
-struct GetRichCompare<B, typename Void<decltype(&B::tp_richcompare)>::Type> {
+WRAP_FUNCTION(tp_richcompare) {
     static PyObject *value(PyObject *pySelf, PyObject *pyB, int op) {
         PY_TRY {
             auto self = reinterpret_cast<B*>(pySelf);
@@ -729,52 +746,28 @@ struct GetRichCompare<B, typename Void<decltype(&B::tp_richcompare)>::Type> {
     };
 };
 
-template <class B, class Enable = void>
-struct GetIter {
-    static constexpr std::nullptr_t value = nullptr;
-};
-
-template <class B>
-struct GetIter<B, typename Void<decltype(&B::tp_iter)>::Type> {
+WRAP_FUNCTION(tp_iter) {
     static PyObject *value(PyObject *self) {
         PY_TRY { return reinterpret_cast<B*>(self)->tp_iter().release(); }
         PY_CATCH(nullptr);
     };
 };
 
-template <class B, class Enable = void>
-struct GetGetAttrO {
-    static constexpr std::nullptr_t value = nullptr;
-};
-
-template <class B>
-struct GetGetAttrO<B, typename Void<decltype(&B::tp_getattro)>::Type> {
+WRAP_FUNCTION(tp_getattro) {
     static PyObject *value(PyObject *self, PyObject *name) {
         PY_TRY { return reinterpret_cast<B*>(self)->tp_getattro(Reference{name}).release(); }
         PY_CATCH(nullptr);
     };
 };
 
-template <class B, class Enable = void>
-struct GetSetAttrO {
-    static constexpr std::nullptr_t value = nullptr;
-};
-
-template <class B>
-struct GetSetAttrO<B, typename Void<decltype(&B::tp_setattro)>::Type> {
+WRAP_FUNCTION(tp_setattro) {
     static int value(PyObject *self, PyObject *name, PyObject *value) {
         PY_TRY { return (reinterpret_cast<B*>(self)->tp_setattro(Reference{name}, Reference{value}), 0); }
         PY_CATCH(-1);
     };
 };
 
-template <class B, class Enable = void>
-struct GetIterNext {
-    static constexpr std::nullptr_t value = nullptr;
-};
-
-template <class B>
-struct GetIterNext<B, typename Void<decltype(&B::tp_iternext)>::Type> {
+WRAP_FUNCTION(tp_iternext) {
     static PyObject *value(PyObject *self) {
         PY_TRY { return reinterpret_cast<B*>(self)->tp_iternext().release(); }
         PY_CATCH(nullptr);
@@ -783,238 +776,93 @@ struct GetIterNext<B, typename Void<decltype(&B::tp_iternext)>::Type> {
 
 // mapping protocol
 
-template <class B, class Enable = void>
-struct GetMPLength {
-    static constexpr std::nullptr_t value = nullptr;
-    static constexpr bool has_mapping = false;
-};
-template <class B>
-struct GetMPLength<B, typename Void<decltype(&B::mp_length)>::Type> {
+BEGIN_PROTOCOL(mp_length)
     static Py_ssize_t value(PyObject *self) {
         PY_TRY { return reinterpret_cast<B*>(self)->mp_length(); }
         PY_CATCH(-1);
-    };
-    static constexpr bool has_mapping = true;
-};
-
-template <class B, class Enable = void>
-struct GetMPSubscipt {
-    static constexpr std::nullptr_t value = nullptr;
-    static constexpr bool has_mapping = GetMPLength<B>::has_mapping;
-};
-template <class B>
-struct GetMPSubscipt<B, typename Void<decltype(&B::mp_subscript)>::Type> {
+    }
+NEXT_PROTOCOL(mp_length, mp_subscript)
     static PyObject *value(PyObject *self, PyObject *name) {
         PY_TRY { return reinterpret_cast<B*>(self)->mp_subscript(Reference{name}).release(); }
         PY_CATCH(nullptr);
-    };
-    static constexpr bool has_mapping = true;
-};
-
-template <class B, class Enable = void>
-struct GetMPAssSubscipt {
-    static constexpr std::nullptr_t value = nullptr;
-    static constexpr bool has_mapping = GetMPSubscipt<B>::has_mapping;
-};
-template <class B>
-struct GetMPAssSubscipt<B, typename Void<decltype(&B::mp_ass_subscript)>::Type> {
+    }
+NEXT_PROTOCOL(mp_subscript, mp_ass_subscript)
     static int value(PyObject *self, PyObject *name, PyObject *value) {
         PY_TRY { return (reinterpret_cast<B*>(self)->mp_ass_subscript(Reference{name}, Reference{value}), 0); }
         PY_CATCH(-1);
-    };
-    static constexpr bool has_mapping = true;
-};
-
-template <class B, class Enable = void>
-struct GetAsMapping {
-    static constexpr PyMappingMethods *value = nullptr;
-};
-template <class B>
-struct GetAsMapping<B, typename std::enable_if<GetMPAssSubscipt<B>::has_mapping>::type> {
-    static PyMappingMethods value[];
-};
-template <class B>
-PyMappingMethods GetAsMapping<B, typename std::enable_if<GetMPAssSubscipt<B>::has_mapping>::type>::value[] = {{
-    GetMPLength<B>::value,
-    GetMPSubscipt<B>::value,
-    GetMPAssSubscipt<B>::value,
+    }
+END_PROTOCOL(mp_ass_subscript, tp_as_mapping, PyMappingMethods) {{
+    Get_mp_length<B>::value,
+    Get_mp_subscript<B>::value,
+    Get_mp_ass_subscript<B>::value,
 }};
 
 // sequence protocol
 
-// Py_ssize_t sq_length(PyObject *self)
-template <class B, class Enable = void>
-struct GetSQLength {
-    static constexpr std::nullptr_t value = nullptr;
-    static constexpr bool has_sequence = false;
-};
-template <class B>
-struct GetSQLength<B, typename Void<decltype(&B::sq_length)>::Type> {
+BEGIN_PROTOCOL(sq_length)
     static Py_ssize_t value(PyObject *self) {
         PY_TRY { return reinterpret_cast<B*>(self)->sq_length(); }
         PY_CATCH(-1);
     };
-    static constexpr bool has_sequence = true;
-};
-
-// PyObject* sq_concat(PyObject *o1, PyObject *o2)
-template <class B, class Enable = void>
-struct GetSQConcat {
-    static constexpr std::nullptr_t value = nullptr;
-    static constexpr bool has_sequence = GetSQLength<B>::has_sequence;
-};
-template <class B>
-struct GetSQConcat<B, typename Void<decltype(&B::sq_concat)>::Type> {
+NEXT_PROTOCOL(sq_length, sq_concat)
     static PyObject *value(PyObject *self, PyObject *other) {
         PY_TRY { return reinterpret_cast<B*>(self)->sq_concat(Reference{other}).release(); }
         PY_CATCH(nullptr);
     };
-    static constexpr bool has_sequence = true;
-};
-
-// PyObject* sq_repeat(PyObject *o, Py_ssize_t count)
-template <class B, class Enable = void>
-struct GetSQRepeat {
-    static constexpr std::nullptr_t value = nullptr;
-    static constexpr bool has_sequence = GetSQConcat<B>::has_sequence;
-};
-template <class B>
-struct GetSQRepeat<B, typename Void<decltype(&B::sq_repeat)>::Type> {
+NEXT_PROTOCOL(sq_concat, sq_repeat)
     static PyObject *value(PyObject *self, Py_ssize_t count) {
         PY_TRY { return reinterpret_cast<B*>(self)->sq_repeat(count).release(); }
         PY_CATCH(nullptr);
     };
-    static constexpr bool has_sequence = true;
-};
-
-// PyObject* sq_item(PyObject *o, Py_ssize_t i)
-template <class B, class Enable = void>
-struct GetSQItem {
-    static constexpr std::nullptr_t value = nullptr;
-    static constexpr bool has_sequence = GetSQRepeat<B>::has_sequence;
-};
-template <class B>
-struct GetSQItem<B, typename Void<decltype(&B::sq_item)>::Type> {
+NEXT_PROTOCOL(sq_repeat, sq_item)
     static PyObject *value(PyObject *self, Py_ssize_t index) {
         PY_TRY { return reinterpret_cast<B*>(self)->sq_item(index).release(); }
         PY_CATCH(nullptr);
     };
-    static constexpr bool has_sequence = true;
-};
-
-// PyObject* sq_slice(PyObject *o, Py_ssize_t i1, Py_ssize_t i2)
-template <class B, class Enable = void>
-struct GetSQSlice {
-    static constexpr std::nullptr_t value = nullptr;
-    static constexpr bool has_sequence = GetSQItem<B>::has_sequence;
-};
-template <class B>
-struct GetSQSlice<B, typename Void<decltype(&B::sq_slice)>::Type> {
+NEXT_PROTOCOL(sq_item, sq_slice)
     static PyObject *value(PyObject *self, Py_ssize_t left, Py_ssize_t right) {
         PY_TRY { return reinterpret_cast<B*>(self)->sq_slice(left, right).release(); }
         PY_CATCH(nullptr);
     };
-    static constexpr bool has_sequence = true;
-};
-
-// int sq_ass_item(PyObject *o, Py_ssize_t i, PyObject *v)
-template <class B, class Enable = void>
-struct GetSQAssItem {
-    static constexpr std::nullptr_t value = nullptr;
-    static constexpr bool has_sequence = GetSQSlice<B>::has_sequence;
-};
-template <class B>
-struct GetSQAssItem<B, typename Void<decltype(&B::sq_ass_item)>::Type> {
+NEXT_PROTOCOL(sq_slice, sq_ass_item)
     static int value(PyObject *self, Py_ssize_t index, PyObject *value) {
         PY_TRY { return (reinterpret_cast<B*>(self)->sq_ass_item(index, Reference{value}), 0); }
         PY_CATCH(-1);
     };
-    static constexpr bool has_sequence = true;
-};
-
-// int sq_ass_slice(PyObject *o, Py_ssize_t i1, Py_ssize_t i2, PyObject *v)
-template <class B, class Enable = void>
-struct GetSQAssSlice {
-    static constexpr std::nullptr_t value = nullptr;
-    static constexpr bool has_sequence = GetSQAssItem<B>::has_sequence;
-};
-template <class B>
-struct GetSQAssSlice<B, typename Void<decltype(&B::sq_ass_slice)>::Type> {
+NEXT_PROTOCOL(sq_ass_item, sq_ass_slice)
     static int value(PyObject *self, Py_ssize_t left, Py_ssize_t right, PyObject *value) {
         PY_TRY { return (reinterpret_cast<B*>(self)->sq_ass_slice(left, right, Reference{value}), 0); }
         PY_CATCH(-1);
     };
-    static constexpr bool has_sequence = true;
-};
-
-// int sq_contains(PyObject *o, PyObject *value)
-template <class B, class Enable = void>
-struct GetSQContains {
-    static constexpr std::nullptr_t value = nullptr;
-    static constexpr bool has_sequence = GetSQAssSlice<B>::has_sequence;
-};
-template <class B>
-struct GetSQContains<B, typename Void<decltype(&B::sq_contains)>::Type> {
+NEXT_PROTOCOL(sq_ass_slice, sq_contains)
     static int value(PyObject *self, PyObject *value) {
         PY_TRY { return reinterpret_cast<B*>(self)->sq_contains(Reference{value}); }
         PY_CATCH(-1);
     };
-    static constexpr bool has_sequence = true;
-};
-
-// PyObject* sq_inplace_concat(PyObject *o1, PyObject *o2)
-template <class B, class Enable = void>
-struct GetSQInplaceConcat {
-    static constexpr std::nullptr_t value = nullptr;
-    static constexpr bool has_sequence = GetSQContains<B>::has_sequence;
-};
-template <class B>
-struct GetSQInplaceConcat<B, typename Void<decltype(&B::sq_inplace_concat)>::Type> {
+NEXT_PROTOCOL(sq_contains, sq_inplace_concat)
     static PyObject *value(PyObject *self, PyObject *other) {
         PY_TRY { return reinterpret_cast<B*>(self)->sq_inplace_concat(Reference{other}); Py_XINCREF(self); return self; }
         PY_CATCH(nullptr);
     };
-    static constexpr bool has_sequence = true;
-};
-
-// PyObject* sq_inplace_repeat(PyObject *o, Py_ssize_t count)
-template <class B, class Enable = void>
-struct GetSQInplaceRepeat {
-    static constexpr std::nullptr_t value = nullptr;
-    static constexpr bool has_sequence = GetSQInplaceConcat<B>::has_sequence;
-};
-template <class B>
-struct GetSQInplaceRepeat<B, typename Void<decltype(&B::sq_inplace_repeat)>::Type> {
+NEXT_PROTOCOL(sq_inplace_concat, sq_inplace_repeat)
     static PyObject *value(PyObject *self, Py_ssize_t count) {
         PY_TRY { reinterpret_cast<B*>(self)->sq_inplace_repeat(count); Py_XINCREF(self); return self; }
         PY_CATCH(nullptr);
     };
-    static constexpr bool has_sequence = true;
-};
-
-template <class B, class Enable = void>
-struct GetAsSequnce {
-    static constexpr PySequenceMethods *value = nullptr;
-};
-template <class B>
-struct GetAsSequnce<B, typename std::enable_if<GetSQInplaceRepeat<B>::has_sequence>::type> {
-    static PySequenceMethods value[];
-};
-template <class B>
-PySequenceMethods GetAsSequnce<B, typename std::enable_if<GetSQInplaceRepeat<B>::has_sequence>::type>::value[] = {{
-    GetSQLength<B>::value,
-    GetSQConcat<B>::value,
-    GetSQRepeat<B>::value,
-    GetSQItem<B>::value,
-    GetSQSlice<B>::value,
-    GetSQAssItem<B>::value,
-    GetSQAssSlice<B>::value,
-    GetSQContains<B>::value,
-    GetSQInplaceConcat<B>::value,
-    GetSQInplaceRepeat<B>::value,
+END_PROTOCOL(sq_inplace_repeat, tp_as_sequence, PySequenceMethods) {{
+    Get_sq_length<B>::value,
+    Get_sq_concat<B>::value,
+    Get_sq_repeat<B>::value,
+    Get_sq_item<B>::value,
+    Get_sq_slice<B>::value,
+    Get_sq_ass_item<B>::value,
+    Get_sq_ass_slice<B>::value,
+    Get_sq_contains<B>::value,
+    Get_sq_inplace_concat<B>::value,
+    Get_sq_inplace_repeat<B>::value,
 }};
 
-} // namespace Detail
+} // namespace PythonDetail
 
 template <class T>
 struct ObjectBase : ObjectProtocoll<T> {
@@ -1093,52 +941,52 @@ PyMethodDef ObjectBase<T>::tp_methods[] = {{nullptr, nullptr, 0, nullptr}};
 template <class T>
 PyTypeObject ObjectBase<T>::type = {
     PyVarObject_HEAD_INIT(nullptr, 0)
-    T::tp_name,                                       // tp_name
-    sizeof(T),                                        // tp_basicsize
-    0,                                                // tp_itemsize
-    Detail::GetDestructor<T>::value,                  // tp_dealloc
-    nullptr,                                          // tp_print
-    nullptr,                                          // tp_getattr
-    nullptr,                                          // tp_setattr
-    nullptr,                                          // tp_compare
-    Detail::GetRepr<T>::value,                        // tp_repr
-    nullptr,                                          // tp_as_number
-    Detail::GetAsSequnce<T>::value,                   // tp_as_sequence
-    Detail::GetAsMapping<T>::value,                   // tp_as_mapping
-    Detail::GetHash<T>::value,                        // tp_hash
-    nullptr,                                          // tp_call
-    Detail::GetStr<T>::value,                         // tp_str
-    Detail::GetGetAttrO<T>::value,                    // tp_getattro
-    Detail::GetSetAttrO<T>::value,                    // tp_setattro
-    nullptr,                                          // tp_as_buffer
-    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,         // tp_flags
-    T::tp_doc,                                        // tp_doc
-    nullptr,                                          // tp_traverse
-    nullptr,                                          // tp_clear
-    Detail::GetRichCompare<T>::value,                 // tp_richcompare
-    0,                                                // tp_weaklistoffset
-    Detail::GetIter<T>::value,                        // tp_iter
-    Detail::GetIterNext<T>::value,                    // tp_iternext
-    T::tp_methods,                                    // tp_methods
-    nullptr,                                          // tp_members
-    T::tp_getset,                                     // tp_getset
-    nullptr,                                          // tp_base
-    nullptr,                                          // tp_dict
-    nullptr,                                          // tp_descr_get
-    nullptr,                                          // tp_descr_set
-    0,                                                // tp_dictoffset
-    reinterpret_cast<initproc>(T::tp_init),           // tp_init
-    nullptr,                                          // tp_alloc
-    reinterpret_cast<newfunc>(T::tp_new),             // tp_new
-    nullptr,                                          // tp_free
-    nullptr,                                          // tp_is_gc
-    nullptr,                                          // tp_bases
-    nullptr,                                          // tp_mro
-    nullptr,                                          // tp_cache
-    nullptr,                                          // tp_subclasses
-    nullptr,                                          // tp_weaklist
-    nullptr,                                          // tp_del
-    0,                                                // tp_version_tag
+    T::tp_name,                                 // tp_name
+    sizeof(T),                                  // tp_basicsize
+    0,                                          // tp_itemsize
+    PythonDetail::Get_tp_dealloc<T>::value,     // tp_dealloc
+    nullptr,                                    // tp_print
+    nullptr,                                    // tp_getattr
+    nullptr,                                    // tp_setattr
+    nullptr,                                    // tp_compare
+    PythonDetail::Get_tp_repr<T>::value,        // tp_repr
+    nullptr,                                    // tp_as_number
+    PythonDetail::Get_tp_as_sequence<T>::value, // tp_as_sequence
+    PythonDetail::Get_tp_as_mapping<T>::value,  // tp_as_mapping
+    PythonDetail::Get_tp_hash<T>::value,        // tp_hash
+    nullptr,                                    // tp_call
+    PythonDetail::Get_tp_str<T>::value,         // tp_str
+    PythonDetail::Get_tp_getattro<T>::value,    // tp_getattro
+    PythonDetail::Get_tp_setattro<T>::value,    // tp_setattro
+    nullptr,                                    // tp_as_buffer
+    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,   // tp_flags
+    T::tp_doc,                                  // tp_doc
+    nullptr,                                    // tp_traverse
+    nullptr,                                    // tp_clear
+    PythonDetail::Get_tp_richcompare<T>::value, // tp_richcompare
+    0,                                          // tp_weaklistoffset
+    PythonDetail::Get_tp_iter<T>::value,        // tp_iter
+    PythonDetail::Get_tp_iternext<T>::value,    // tp_iternext
+    T::tp_methods,                              // tp_methods
+    nullptr,                                    // tp_members
+    T::tp_getset,                               // tp_getset
+    nullptr,                                    // tp_base
+    nullptr,                                    // tp_dict
+    nullptr,                                    // tp_descr_get
+    nullptr,                                    // tp_descr_set
+    0,                                          // tp_dictoffset
+    reinterpret_cast<initproc>(T::tp_init),     // tp_init
+    nullptr,                                    // tp_alloc
+    reinterpret_cast<newfunc>(T::tp_new),       // tp_new
+    nullptr,                                    // tp_free
+    nullptr,                                    // tp_is_gc
+    nullptr,                                    // tp_bases
+    nullptr,                                    // tp_mro
+    nullptr,                                    // tp_cache
+    nullptr,                                    // tp_subclasses
+    nullptr,                                    // tp_weaklist
+    nullptr,                                    // tp_del
+    0,                                          // tp_version_tag
     GRINGO_STRUCT_EXTRA
 };
 
@@ -1219,7 +1067,7 @@ TheoryTermType.List     -- a list theory term
 TheoryTermType.Tuple    -- a tuple theory term
 TheoryTermType.Set      -- a set theory term)";
 
-    static constexpr Gringo::TheoryData::TermType values[] = {
+    static constexpr Gringo::TheoryData::TermType const values[] = {
         Gringo::TheoryData::TermType::Function,
         Gringo::TheoryData::TermType::Number,
         Gringo::TheoryData::TermType::Symbol,
@@ -1227,7 +1075,7 @@ TheoryTermType.Set      -- a set theory term)";
         Gringo::TheoryData::TermType::Tuple,
         Gringo::TheoryData::TermType::Set
     };
-    static constexpr const char * strings[] = {
+    static constexpr const char * const strings[] = {
         "Function",
         "Number",
         "Symbol",
@@ -1237,8 +1085,8 @@ TheoryTermType.Set      -- a set theory term)";
     };
 };
 
-constexpr TheoryData::TermType TheoryTermType::values[];
-constexpr const char * TheoryTermType::strings[];
+constexpr Gringo::TheoryData::TermType const TheoryTermType::values[];
+constexpr const char * const TheoryTermType::strings[];
 
 struct TheoryTerm : ObjectBase<TheoryTerm> {
     Gringo::TheoryData const *data;
@@ -1512,12 +1360,12 @@ SymbolType.Function -- a numeric symbol - e.g., c, (1, "a"), or f(1,"a")
 SymbolType.Infimum  -- the #inf symbol
 SymbolType.Supremum -- the #sup symbol)";
 
-    static constexpr Type values[] =          {  Number,   String,   Function,   Inf,       Sup };
-    static constexpr const char * strings[] = { "Number", "String", "Function", "Infimum", "Supremum" };
+    static constexpr Type const values[] =          {  Number,   String,   Function,   Inf,       Sup };
+    static constexpr const char * const strings[] = { "Number", "String", "Function", "Infimum", "Supremum" };
 };
 
-constexpr SymbolType::Type SymbolType::values[];
-constexpr const char * SymbolType::strings[];
+constexpr SymbolType::Type const SymbolType::values[];
+constexpr const char * const SymbolType::strings[];
 
 struct Symbol : ObjectBase<Symbol> {
     Gringo::Symbol val;
@@ -1695,7 +1543,7 @@ preconstructed symbols Infimum and Supremum.)";
     }
 
     long tp_hash() {
-        return val.hash();
+        return static_cast<long>(val.hash());
     }
 
     Object tp_richcompare(Symbol &b, int op) {
@@ -1927,7 +1775,7 @@ places like - e.g., the main function.)";
     static PyObject *atoms(Model *self, PyObject *pyargs, PyObject *pykwds) {
         PY_TRY
             unsigned atomset = 0;
-            static char const *kwlist[] = {"atoms", "terms", "shown", "csp", "extra", "comp", nullptr};
+            static char const *kwlist[] = {"atoms", "terms", "shown", "csp", "extra", "complement", nullptr};
             PyObject *pyAtoms = Py_False, *pyTerms = Py_False, *pyShown = Py_False, *pyCSP = Py_False, *pyExtra = Py_False, *pyComp = Py_False;
             if (!PyArg_ParseTupleAndKeywords(pyargs, pykwds, "|OOOOOO", const_cast<char**>(kwlist), &pyAtoms, &pyTerms, &pyShown, &pyCSP, &pyExtra, &pyComp)) { return nullptr; }
             if (pyToCpp<bool>(pyAtoms)) { atomset |= clingo_show_type_atoms; }
@@ -1973,25 +1821,25 @@ The return values correspond to clasp's cost output.)", nullptr},
 
 PyMethodDef Model::tp_methods[] = {
     {"symbols", (PyCFunction)atoms, METH_VARARGS | METH_KEYWORDS,
-R"(symbols(self, atoms, terms, shown, csp, comp)
+R"(symbols(self, atoms, terms, shown, csp, extra, complement)
         -> list of terms
 
 Return the list of atoms, terms, or CSP assignments in the model.
 
 Keyword Arguments:
-atoms -- select all atoms in the model (independent of #show statements)
-         (Default: False)
-terms -- select all terms displayed with #show statements in the model
-         (Default: False)
-shown -- select all atoms and terms as outputted by clingo
-         (Default: False)
-csp   -- select all csp assignments (independent of #show statements)
-         (Default: False)
-extra -- select terms added by clingo extensions
-         (Default: False)
-comp  -- return the complement of the answer set w.r.t. to the Herbrand
-         base accumulated so far (does not affect csp assignments)
-         (Default: False)
+atoms      -- select all atoms in the model (independent of #show statements)
+              (Default: False)
+terms      -- select all terms displayed with #show statements in the model
+              (Default: False)
+shown      -- select all atoms and terms as outputted by clingo
+              (Default: False)
+csp        -- select all csp assignments (independent of #show statements)
+              (Default: False)
+extra      -- select terms added by clingo extensions
+              (Default: False)
+complement -- return the complement of the answer set w.r.t. to the Herbrand
+              base accumulated so far (does not affect csp assignments)
+              (Default: False)
 
 Note that atoms are represented using functions (Symbol objects), and that CSP
 assignments are represented using functions with name "$" where the first
@@ -2751,12 +2599,58 @@ struct PropagateControl : ObjectBase<PropagateControl> {
         PY_CATCH(nullptr);
     }
 
+    Object add_literal() {
+        return cppToPy(ctl->addVariable());
+    }
+
+    Object add_watch(Reference pyLit) {
+        ctl->addWatch(pyToCpp<clingo_literal_t>(pyLit));
+        return None();
+    }
+
+    Object remove_watch(Reference pyLit) {
+        ctl->addWatch(pyToCpp<clingo_literal_t>(pyLit));
+        return None();
+    }
+
+    Object has_watch(Reference pyLit) {
+        return cppToPy(ctl->hasWatch(pyToCpp<clingo_literal_t>(pyLit)));
+    }
+
     static PyObject *assignment(PropagateControl *self, void *) {
         return Assignment::construct(self->ctl->assignment());
     }
 };
 
 PyMethodDef PropagateControl::tp_methods[] = {
+    {"add_literal", to_function<&PropagateControl::add_literal>(), METH_NOARGS, R"(add_literal(self) -> int
+
+Adds a new positive volatile literal to the underlying solver thread.
+
+The literal is only valid within the current solving step and solver thread.
+All volatile literals and clauses involving a volatile literal are deleted
+after the current search.)"},
+    {"add_watch", to_function<&PropagateControl::add_watch>(), METH_O, R"(add_watch(self, literal) -> None
+Add a watch for the solver literal in the given phase.
+
+Unlike PropagateInit.add_watch() this does not add a watch to all solver
+threads but just the current one.
+
+Arguments:
+literal -- the target literal)"},
+    {"has_watch", to_function<&PropagateControl::has_watch>(), METH_O, R"(has_watch(self, literal) -> bool
+Check whether a literal is watched in the current solver thread.
+
+Arguments:
+literal -- the target literal)"},
+    {"remove_watch", to_function<&PropagateControl::remove_watch>(), METH_O, R"(remove_watch(self, literal) -> None
+Removes the watch (if any) for the given solver literal.
+
+Similar to PropagateInit.add_watch() this just removes the watch in the current
+solver thread.
+
+Arguments:
+literal -- the target literal)"},
     {"add_clause", (PyCFunction)addClause, METH_KEYWORDS | METH_VARARGS, R"(add_clause(self, clause, tag, lock) -> bool
 
 Add the given clause to the solver.
@@ -3006,14 +2900,14 @@ AggregateFunction.SumPlus -- the #sum+ function
 AggregateFunction.Min     -- the #min function
 AggregateFunction.Max     -- the #max function)";
 
-    static constexpr clingo_ast_aggregate_function_t values[] = {
+    static constexpr clingo_ast_aggregate_function_t const values[] = {
         clingo_ast_aggregate_function_count,
         clingo_ast_aggregate_function_sum,
         clingo_ast_aggregate_function_sump,
         clingo_ast_aggregate_function_min,
         clingo_ast_aggregate_function_max
     };
-    static constexpr const char * strings[] = {
+    static constexpr const char * const strings[] = {
         "Count",
         "Sum",
         "SumPlus",
@@ -3032,8 +2926,8 @@ AggregateFunction.Max     -- the #max function)";
     }
 };
 
-constexpr clingo_ast_aggregate_function_t AggregateFunction::values[];
-constexpr const char * AggregateFunction::strings[];
+constexpr clingo_ast_aggregate_function_t const AggregateFunction::values[];
+constexpr const char * const AggregateFunction::strings[];
 
 struct ComparisonOperator : EnumType<ComparisonOperator> {
     static constexpr char const *tp_type = "ComparisonOperator";
@@ -3048,7 +2942,7 @@ ComparisonOperator.GreaterEqual -- the >= operator
 ComparisonOperator.NotEqual     -- the != operator
 ComparisonOperator.Equal        -- the = operator)";
 
-    static constexpr clingo_ast_comparison_operator_t values[] = {
+    static constexpr clingo_ast_comparison_operator_t const values[] = {
         clingo_ast_comparison_operator_greater_than,
         clingo_ast_comparison_operator_less_than,
         clingo_ast_comparison_operator_less_equal,
@@ -3056,7 +2950,7 @@ ComparisonOperator.Equal        -- the = operator)";
         clingo_ast_comparison_operator_not_equal,
         clingo_ast_comparison_operator_equal
     };
-    static constexpr const char * strings[] = {
+    static constexpr const char * const strings[] = {
         "GreaterThan",
         "LessThan",
         "LessEqual",
@@ -3077,8 +2971,8 @@ ComparisonOperator.Equal        -- the = operator)";
     }
 };
 
-constexpr clingo_ast_comparison_operator_t ComparisonOperator::values[];
-constexpr const char * ComparisonOperator::strings[];
+constexpr clingo_ast_comparison_operator_t const ComparisonOperator::values[];
+constexpr const char * const ComparisonOperator::strings[];
 
 struct ASTType : EnumType<ASTType> {
     enum T {
@@ -3097,7 +2991,7 @@ struct ASTType : EnumType<ASTType> {
     static constexpr char const *tp_doc =
 R"(Enumeration of ast node types.)";
 
-    static constexpr T values[] = {
+    static constexpr T const values[] = {
         Id,
         Variable, Symbol, UnaryOperation, BinaryOperation, Interval, Function, Pool,
         CSPProduct, CSPSum, CSPGuard,
@@ -3108,7 +3002,7 @@ R"(Enumeration of ast node types.)";
         TheoryOperatorDefinition, TheoryTermDefinition, TheoryGuardDefinition, TheoryAtomDefinition, TheoryDefinition,
         Rule, Definition, ShowSignature, ShowTerm, Minimize, Script, Program, External, Edge, Heuristic, ProjectAtom, ProjectSignature,
     };
-    static constexpr const char * strings[] = {
+    static constexpr const char * const strings[] = {
         "Id",
         "Variable", "Symbol", "UnaryOperation", "BinaryOperation", "Interval", "Function", "Pool",
         "CSPProduct", "CSPSum", "CSPGuard",
@@ -3121,8 +3015,8 @@ R"(Enumeration of ast node types.)";
     };
 };
 
-constexpr ASTType::T ASTType::values[];
-constexpr const char * ASTType::strings[];
+constexpr ASTType::T const ASTType::values[];
+constexpr const char * const ASTType::strings[];
 
 struct Sign : EnumType<Sign> {
     static constexpr char const *tp_type = "Sign";
@@ -3134,12 +3028,12 @@ Sign.None           --
 Sign.Negation       -- not
 Sign.DoubleNegation -- not not)";
 
-    static constexpr clingo_ast_sign_t values[] = {
+    static constexpr clingo_ast_sign_t const values[] = {
         clingo_ast_sign_none,
         clingo_ast_sign_negation,
         clingo_ast_sign_double_negation
     };
-    static constexpr const char * strings[] = {
+    static constexpr const char * const strings[] = {
         "None",
         "Negation",
         "DoubleNegation"
@@ -3154,8 +3048,8 @@ Sign.DoubleNegation -- not not)";
     }
 };
 
-constexpr clingo_ast_sign_t Sign::values[];
-constexpr const char * Sign::strings[];
+constexpr clingo_ast_sign_t const Sign::values[];
+constexpr const char * const Sign::strings[];
 
 struct UnaryOperator : EnumType<UnaryOperator> {
     static PyMethodDef tp_methods[];
@@ -3170,12 +3064,12 @@ UnaryOperator.Minus    -- unary minus and classical negation
 UnaryOperator.Absolute -- absolute value
 )";
 
-    static constexpr clingo_ast_unary_operator_t values[] = {
+    static constexpr clingo_ast_unary_operator_t const values[] = {
         clingo_ast_unary_operator_absolute,
         clingo_ast_unary_operator_minus,
         clingo_ast_unary_operator_negation,
     };
-    static constexpr const char * strings[] = {
+    static constexpr const char * const strings[] = {
         "Absolute",
         "Minus",
         "Negation",
@@ -3207,8 +3101,8 @@ Right-hand side representation of the operator.)"},
     { nullptr, nullptr, 0, nullptr }
 };
 
-constexpr clingo_ast_unary_operator_t UnaryOperator::values[];
-constexpr const char * UnaryOperator::strings[];
+constexpr clingo_ast_unary_operator_t const UnaryOperator::values[];
+constexpr const char * const UnaryOperator::strings[];
 
 struct BinaryOperator : EnumType<BinaryOperator> {
     static constexpr char const *tp_type = "BinaryOperator";
@@ -3225,7 +3119,7 @@ BinaryOperator.Multiplication -- arithmetic multipilcation
 BinaryOperator.Division       -- arithmetic division
 BinaryOperator.Modulo         -- arithmetic modulo
 )";
-    static constexpr clingo_ast_binary_operator_t values[] = {
+    static constexpr clingo_ast_binary_operator_t const values[] = {
         clingo_ast_binary_operator_xor,
         clingo_ast_binary_operator_or,
         clingo_ast_binary_operator_and,
@@ -3235,7 +3129,7 @@ BinaryOperator.Modulo         -- arithmetic modulo
         clingo_ast_binary_operator_division,
         clingo_ast_binary_operator_modulo,
     };
-    static constexpr const char * strings[] = {
+    static constexpr const char * const strings[] = {
         "XOr",
         "Or",
         "And",
@@ -3260,8 +3154,8 @@ BinaryOperator.Modulo         -- arithmetic modulo
     }
 };
 
-constexpr clingo_ast_binary_operator_t BinaryOperator::values[];
-constexpr const char * BinaryOperator::strings[];
+constexpr clingo_ast_binary_operator_t const BinaryOperator::values[];
+constexpr const char * const BinaryOperator::strings[];
 
 struct TheorySequenceType : EnumType<TheorySequenceType> {
     enum T { Set, Tuple, List };
@@ -3277,12 +3171,12 @@ TheorySequenceType.List  -- sequence enclosed in brackets
 TheorySequenceType.Set   -- sequence enclosed in braces
 )";
 
-    static constexpr T values[] = {
+    static constexpr T const values[] = {
         Set,
         Tuple,
         List,
     };
-    static constexpr const char * strings[] = {
+    static constexpr const char * const strings[] = {
         "Set",
         "Tuple",
         "List",
@@ -3317,8 +3211,8 @@ Right-hand side representation of the sequence.)"},
     { nullptr, nullptr, 0, nullptr }
 };
 
-constexpr TheorySequenceType::T TheorySequenceType::values[];
-constexpr const char * TheorySequenceType::strings[];
+constexpr TheorySequenceType::T const TheorySequenceType::values[];
+constexpr const char * const TheorySequenceType::strings[];
 
 struct TheoryOperatorType : EnumType<TheoryOperatorType> {
     static constexpr char const *tp_type = "TheoryOperatorType";
@@ -3330,12 +3224,12 @@ TheoryOperatorType.Unary       -- unary operator
 TheoryOperatorType.BinaryLeft  -- binary left associative operator
 TheoryOperatorType.BinaryRight -- binary right associative operator)";
 
-    static constexpr clingo_ast_theory_operator_type_t values[] = {
+    static constexpr clingo_ast_theory_operator_type_t const values[] = {
         clingo_ast_theory_operator_type_unary,
         clingo_ast_theory_operator_type_binary_left,
         clingo_ast_theory_operator_type_binary_right
     };
-    static constexpr const char * strings[] = {
+    static constexpr const char * const strings[] = {
         "Unary",
         "BinaryLeft",
         "BinaryRight"
@@ -3350,8 +3244,8 @@ TheoryOperatorType.BinaryRight -- binary right associative operator)";
     }
 };
 
-constexpr clingo_ast_theory_operator_type_t TheoryOperatorType::values[];
-constexpr const char * TheoryOperatorType::strings[];
+constexpr clingo_ast_theory_operator_type_t const TheoryOperatorType::values[];
+constexpr const char * const TheoryOperatorType::strings[];
 
 struct TheoryAtomType : EnumType<TheoryAtomType> {
     static constexpr char const *tp_type = "TheoryAtomType";
@@ -3365,13 +3259,13 @@ TheoryAtomType.Head      -- atom can only occur in rule heads
 TheoryAtomType.Directive -- atom can only occrur in facts
 )";
 
-    static constexpr clingo_ast_theory_atom_definition_type_t values[] = {
+    static constexpr clingo_ast_theory_atom_definition_type_t const values[] = {
         clingo_ast_theory_atom_definition_type_any,
         clingo_ast_theory_atom_definition_type_body,
         clingo_ast_theory_atom_definition_type_head,
         clingo_ast_theory_atom_definition_type_directive
     };
-    static constexpr const char * strings[] = {
+    static constexpr const char * const strings[] = {
         "Any",
         "Body",
         "Head",
@@ -3388,8 +3282,8 @@ TheoryAtomType.Directive -- atom can only occrur in facts
     }
 };
 
-constexpr clingo_ast_theory_atom_definition_type_t TheoryAtomType::values[];
-constexpr const char * TheoryAtomType::strings[];
+constexpr clingo_ast_theory_atom_definition_type_t const TheoryAtomType::values[];
+constexpr const char * const TheoryAtomType::strings[];
 
 struct ScriptType : EnumType<ScriptType> {
     enum T { Python, Lua };
@@ -3402,11 +3296,11 @@ ScriptType.Python -- python code
 ScriptType.Lua    -- lua code
 )";
 
-    static constexpr T values[] = {
+    static constexpr T const values[] = {
         Python,
         Lua
     };
-    static constexpr const char * strings[] = {
+    static constexpr const char * const strings[] = {
         "Python",
         "Lua",
     };
@@ -3419,8 +3313,8 @@ ScriptType.Lua    -- lua code
     }
 };
 
-constexpr ScriptType::T ScriptType::values[];
-constexpr const char * ScriptType::strings[];
+constexpr ScriptType::T const ScriptType::values[];
+constexpr const char * const ScriptType::strings[];
 
 // }}}3
 
@@ -6450,7 +6344,7 @@ bool Python::callable(String name) {
     try {
         return impl && impl->callable(name);
     }
-    catch (PyException const &e) {
+    catch (PyException const &) {
         PyErr_Clear();
         return false;
     }
@@ -6509,7 +6403,7 @@ Python::Python(GringoModule &) { }
 bool Python::exec(Location const &loc, String ) {
     std::stringstream ss;
     ss << loc << ": error: clingo has been build without python support\n";
-    throw GringoError(ss.str());
+    throw GringoError(ss.str().c_str());
 }
 bool Python::callable(String) {
     return false;

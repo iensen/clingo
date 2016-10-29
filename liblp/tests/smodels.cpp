@@ -1,7 +1,7 @@
 // 
 // Copyright (c) 2015, Benjamin Kaufmann
 // 
-// This file is part of Potassco. See http://potassco.sourceforge.net/
+// This file is part of Potassco.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -57,7 +57,7 @@ public:
 			Rule_t rt = Rule_t::Basic;
 			std::vector<int> r(1, at(head, 0));
 			if (size(head) > 1 || ht == Head_t::Choice) {
-				r[0] = size(head);
+				r[0] = static_cast<int>(size(head));
 				r.insert(r.end(), begin(head), end(head));
 				rt = ht == Head_t::Choice ? Rule_t::Choice : Rule_t::Disjunctive;
 			}

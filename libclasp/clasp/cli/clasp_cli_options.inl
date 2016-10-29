@@ -1,24 +1,24 @@
-// 
+//
 // Copyright (c) 2013-2016, Benjamin Kaufmann
-// 
-// This file is part of Clasp. See http://www.cs.uni-potsdam.de/clasp/ 
-// 
+//
+// This file is part of Clasp. See http://www.cs.uni-potsdam.de/clasp/
+//
 // Clasp is free software; you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
 // the Free Software Foundation; either version 2 of the License, or
 // (at your option) any later version.
-// 
+//
 // Clasp is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 // GNU General Public License for more details.
-// 
+//
 // You should have received a copy of the GNU General Public License
 // along with Clasp; if not, write to the Free Software
 // Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 //
 /*!
- * \file 
+ * \file
  * \brief Supermacros for describing clasp's options.
  * \code
  * OPTION(key, "ext", ARG(...), "help", set, get)
@@ -30,13 +30,13 @@
  *  - a description (string)
  *  - a set action to be executed when a value (string) for the option is found in a source
  *  - a get action to be executed when the current value for an option is requested
- *  . 
- * 
- * \note In the implementation of ClaspCliConfig, each key is mapped to an enumeration constant and 
- * the stringified version of key (i.e. \#key) is used to identify options. 
+ *  .
+ *
+ * \note In the implementation of ClaspCliConfig, each key is mapped to an enumeration constant and
+ * the stringified version of key (i.e. \#key) is used to identify options.
  * Furthermore, the key is also used for generating command-line option names.
- * As a convention, compound keys using 'snake_case' to separate words 
- * are mapped to dash-separated command-line option names. 
+ * As a convention, compound keys using 'snake_case' to separate words
+ * are mapped to dash-separated command-line option names.
  * E.g. an \<option_like_this\> is mapped to the command-line option "option-like-this".
  *
  * \note ClaspCliConfig assumes a certain option order. In particular, context options shall
@@ -126,7 +126,7 @@ OPTION(stats, ",s", ARG(implicit("1")->arg("<n>[,<t>]")), "Enable {1=basic|2=ful
         && SET(SELF.stats, s) && ((!SELF.testerConfig() && t == 0) || SET(SELF.addTesterConfig()->stats, t));
     },\
     GET_FUN(str) { ITE(!SELF.testerConfig() || !SELF.testerConfig()->stats, str << SELF.stats, str << SELF.stats << SELF.testerConfig()->stats); })
-OPTION(parse_ext, "!", ARG(flag()), "Enable extensions in smodels and dimacs input",\
+OPTION(parse_ext, "!", ARG(flag()), "Enable extensions in non-aspif input",\
     FUN(arg) { bool b = false; return (arg.off() || arg >> b) && SET(SELF.parse.ext, (b ? unsigned(ParserOptions::parse_full):0u)); }, \
     GET((SELF.parse.ext != 0)))
 GROUP_END(SELF)
@@ -146,7 +146,7 @@ OPTION(opt_strategy , ""  , ARG_EXT(arg("<arg>")->implicit("1"), DEFINE_ENUM_MAP
        "          1: hierarchical algorithm and constant steps\n"                 \
        "          2: hierarchical algorithm and exponentially increasing steps\n" \
        "          3: hierarchical algorithm and exponentially decreasing steps\n" \
-       "        usc: unsatisfiable-core guided optimization (<n = {0..15}>)\n"    \
+       "        usc: unsatisfiable-core guided optimization (bitmask <n = {0..15}>)\n"\
        "          1: enable disjoint-core preprocessing\n"                        \
        "          2: disable redundant (symmetry) constraints\n"                  \
        "          4: enable PMRES instead of OLL algorithm\n"                     \
@@ -213,8 +213,8 @@ OPTION(acyc_prop, ",@2", ARG(implicit("1")->arg("{0..1}")), "Acyc propagate with
        FUN(arg) { uint32 x; return arg>>x && SET_LEQ(SELF.acycFwd, (1u-x), 1u); }, GET(1u-SELF.acycFwd))
 OPTION(seed          , ""   , ARG(arg("<n>")),"Set random number generator's seed to %A", STORE(SELF.seed), GET(SELF.seed))
 OPTION(no_lookback   , ""   , ARG(flag()), "Disable all lookback strategies\n", STORE_FLAG(SELF.search),GET(static_cast<bool>(SELF.search == SolverStrategies::no_learning)))
-OPTION(forget_on_step, ""   , ARG(arg("<bits>")), "Configure forgetting on (incremental) step\n"\
-       "      Forget {1=heuristic|2=signs|4=nogood activities|8=learnt nogoods}\n", STORE_LEQ(SELF.forgetSet, 15u), GET(SELF.forgetSet))
+OPTION(forget_on_step, ""   , ARG(arg("<mask>")), "Configure forgetting on (incremental) step\n"\
+       "      Forget {1=heuristic,2=signs,4=nogood activities,8=learnt nogoods}\n", STORE_LEQ(SELF.forgetSet, 15u), GET(SELF.forgetSet))
 OPTION(strengthen    , "!"  , ARG_EXT(arg("<X>"), DEFINE_ENUM_MAPPING(SolverStrategies::CCMinType, \
        MAP("local", SolverStrategies::cc_local), MAP("recursive", SolverStrategies::cc_recursive))), \
        "Use MiniSAT-like conflict nogood strengthening\n" \
@@ -257,7 +257,7 @@ GROUP_BEGIN(SELF)
 OPTION(partial_check, "", ARG(implicit("50")), "Configure partial stability tests\n" \
        "      %A: <p>[,<h>] / Implicit: %I\n" \
        "        <p>: Partial check skip percentage\n"    \
-       "        <h>: Init/update value for high bound (0 = umax)", FUN(arg) {\
+       "        <h>: Init/update value for high bound ([0]=umax)", FUN(arg) {\
        uint32 p = 0; uint32 h = 0; \
        return (arg.off() || (arg>>p>>opt(h) && p)) && SET_LEQ(SELF.fwdCheck.highPct, p, 100u) && SET_OR_ZERO(SELF.fwdCheck.highStep, h);},\
        GET_IF(SELF.fwdCheck.highPct, SELF.fwdCheck.highPct, SELF.fwdCheck.highStep))
@@ -463,6 +463,8 @@ OPTION(enum_mode   , ",e", ARG_EXT(defaultsTo("auto")->state(Value::value_defaul
        "        brave   : Compute brave consequences (union of models)\n" \
        "        cautious: Compute cautious consequences (intersection of models)\n" \
        "        auto    : Use bt for enumeration and record for optimization", STORE(SELF.enumMode), GET(SELF.enumMode))
+OPTION(project, "", ARG(implicit("6")), "Enable projective solution enumeration", STORE_LEQ(SELF.project, 7u), GET(SELF.project))
+OPTION(models, ",n", ARG(arg("<n>")), "Compute at most %A models (0 for all)\n", STORE(SELF.numModels), GET(SELF.numModels))
 OPTION(opt_mode   , "", ARG_EXT(arg("<mode>"), DEFINE_ENUM_MAPPING(MinimizeMode_t::Mode,\
        MAP("opt" , MinimizeMode_t::optimize), MAP("enum"  , MinimizeMode_t::enumerate),\
        MAP("optN", MinimizeMode_t::enumOpt) , MAP("ignore", MinimizeMode_t::ignore))),\
@@ -476,9 +478,7 @@ OPTION(opt_bound, "!" , ARG(arg("<opt>...")), "Initialize objective function(s)"
        SumVec B; \
        return (arg.off() || arg>>B) && (SELF.optBound.swap(B), true);},\
        GET_IF(!SELF.optBound.empty(), SELF.optBound))
-OPTION(opt_sat    , ""   , ARG(flag())         , "Treat DIMACS input as MaxSAT optimization problem", STORE(SELF.maxSat), GET(SELF.maxSat))
-OPTION(project    , ""   , ARG(implicit("6"))  , "Project models to named atoms", STORE_LEQ(SELF.project,7u), GET(SELF.project))
-OPTION(models     , ",n", ARG(arg("<n>"))      , "Compute at most %A models (0 for all)\n", STORE(SELF.numModels), GET(SELF.numModels))
+OPTION(opt_sat    , ""   , ARG(flag())         , "Treat dimacs input as MaxSAT optimization problem", STORE(SELF.maxSat), GET(SELF.maxSat))
 GROUP_END(SELF)
 #undef CLASP_SOLVE_OPTIONS
 #undef SELF

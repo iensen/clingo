@@ -1,7 +1,7 @@
 // 
 // Copyright (c) 2015, Benjamin Kaufmann
 // 
-// This file is part of Potassco. See http://potassco.sourceforge.net/
+// This file is part of Potassco.
 // 
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -287,13 +287,13 @@ SmodelsOutput& SmodelsOutput::add(Head_t ht, const AtomSpan& head) {
 }
 
 SmodelsOutput& SmodelsOutput::add(const LitSpan& lits) {
-	unsigned neg = negSize(lits), size = Potassco::size(lits);
+	unsigned neg = negSize(lits), size = static_cast<unsigned>(Potassco::size(lits));
 	add(size).add(neg);
 	print(os_, lits, neg, size - neg, Atom());
 	return *this;
 }
 SmodelsOutput& SmodelsOutput::add(Weight_t bnd, const WeightLitSpan& lits, bool card) {
-	unsigned neg = negSize(lits), size = Potassco::size(lits);
+	unsigned neg = negSize(lits), size = static_cast<unsigned>(Potassco::size(lits));
 	if (!card) { add(static_cast<unsigned>(bnd)); }
 	add(size).add(neg);
 	if (card)  { add(static_cast<unsigned>(bnd)); }

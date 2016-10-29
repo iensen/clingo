@@ -230,6 +230,7 @@ struct clingo_control {
     virtual Gringo::SolveFuture *solveAsync(ModelHandler mh, FinishHandler fh, Assumptions &&assumptions) = 0;
     virtual Gringo::SolveIter *solveIter(Assumptions &&assumptions) = 0;
     virtual void interrupt() = 0;
+    virtual void *claspFacade() = 0;
     virtual void add(std::string const &name, Gringo::FWStringVec const &params, std::string const &part) = 0;
     virtual void load(std::string const &filename) = 0;
     virtual Gringo::Symbol getConst(std::string const &name) = 0;
@@ -241,6 +242,7 @@ struct clingo_control {
     virtual void cleanupDomains() = 0;
     virtual Gringo::TheoryData const &theory() const = 0;
     virtual void registerPropagator(std::unique_ptr<Gringo::Propagator> p, bool sequential) = 0;
+    virtual void registerObserver(std::unique_ptr<Potassco::AbstractProgram> program) = 0;
     virtual Potassco::Atom_t addProgramAtom() = 0;
     virtual Gringo::Backend *backend() = 0;
     virtual Gringo::Logger &logger() = 0;
@@ -252,7 +254,7 @@ struct clingo_control {
 
 namespace Gringo {
 
-/// {{{1 declaration of GringoModule
+// {{{1 declaration of GringoModule
 
 struct GringoModule {
     virtual Gringo::Control *newControl(int argc, char const * const *argv, Gringo::Logger::Printer p, unsigned messageLimit) = 0;

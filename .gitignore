@@ -4,3 +4,14 @@
 build
 *.pyc
 doc
+*.opendb
+Debug
+Release
+ReleaseScript
+.vs
+*.db
+*.vcxproj.user
+x64
+libgringo/generated
+homewv.sh
+.nfs*
