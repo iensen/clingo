@@ -2,14 +2,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-bool on_rule(bool choice, clingo_atom_t const *head, size_t head_size, clingo_literal_t const *body, size_t body_size, void *data) {
-
-}
-//! Observe weight rules passed to the solver.
-
-
-bool on_model(clingo_model_t *model, void *data, bool *goon) {
-  (void)data;
+bool print_model(clingo_model_t *model) {
   bool ret = true;
   clingo_symbol_t *atoms = NULL;
   size_t atoms_n;
@@ -56,7 +49,6 @@ bool on_model(clingo_model_t *model, void *data, bool *goon) {
   }
 
   printf("\n");
-  *goon = true;
   goto out;
 
 error:
@@ -69,10 +61,17 @@ out:
   return ret;
 }
 
+bool rule (bool choice, clingo_atom_t const *head, size_t head_size, clingo_literal_t const *body, size_t body_size, void *data) {
+  printf("RULE\n");
+}
+
+
+
 int main(int argc, char const **argv) {
   char const *error_message;
   int ret = 0;
-  clingo_solve_result_bitset_t solve_ret;
+  clingo_solve_iteratively_t *it = NULL;
+  clingo_model_t *model;
   clingo_control_t *ctl = NULL;
   clingo_part_t parts[] = {{ "base", NULL, 0 }};
 
@@ -82,11 +81,29 @@ int main(int argc, char const **argv) {
   // add a logic program to the base part
   if (!clingo_control_add(ctl, "base", NULL, 0, "a :- not b. b :- not a.")) { goto error; }
 
+  clingo_ground_program_observer_t observer = {
+          NULL, NULL, NULL,
+          (bool(*)(bool choice, clingo_atom_t const *head, size_t head_size, clingo_literal_t const *body, size_t body_size, void *data)) rule
+  };
+
+
+  clingo_control_register_observer	(ctl, observer, NULL);
+
+
   // ground the base part
   if (!clingo_control_ground(ctl, parts, 1, NULL, NULL)) { goto error; }
 
   // solve using a model callback
-  if (!clingo_control_solve(ctl, on_model, NULL, NULL, 0, &solve_ret)) { goto error; }
+  if (!clingo_control_solve_iteratively(ctl, NULL, 0, &it)) { goto error; }
+
+  for (;;) {
+    // get the next model
+    if (!clingo_solve_iteratively_next(it, &model)) { goto error; }
+
+    // stop if the search space has been exhausted or the requested number of models found
+    if (!model) { break; }
+    if (!print_model(model)) { goto error; }
+  }
 
   goto out;
 
@@ -97,6 +114,7 @@ error:
   ret = clingo_error_code();
 
 out:
+  if (it)  { clingo_solve_iteratively_close(it); }
   if (ctl) { clingo_control_free(ctl); }
 
   return ret;
