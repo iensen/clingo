@@ -62,7 +62,8 @@ out:
 }
 
 bool rule (bool choice, clingo_atom_t const *head, size_t head_size, clingo_literal_t const *body, size_t body_size, void *data) {
-  printf("RULE\n");
+    printf("RULE\n");
+    return true;
 }
 
 
