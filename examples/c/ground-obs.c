@@ -68,6 +68,7 @@ clingo_symbolic_atom_iterator_t it_atoms, ie_atoms;
 
 
 bool output_atom(clingo_symbol_t symbol, clingo_atom_t atom, void *data) {
+
     char *str = NULL;
     size_t str_n = 0;
     printf("atom: %u",atom);
@@ -205,7 +206,7 @@ int main(int argc, char const **argv) {
     if (!clingo_control_new(argv+1, argc-1, NULL, NULL, 20, &ctl) != 0) { goto error; }
 
     // add a logic program to the base part
-    if (!clingo_control_add(ctl, "base", NULL, 0, "a(1,2) :- not b(1,2). b(1,2) :- not a(1,2). -b(1,2) :- not -a(1,2). -a(1,2) :- not -b(1,2).")) { goto error; }
+    if (!clingo_control_add(ctl, "base", NULL, 0, "y(X) :- not b(X),p(X). b(X) :- not y(X),p(X). p(1). y(1).")) { goto error; }
 
 
     clingo_ground_program_observer_t observer;
