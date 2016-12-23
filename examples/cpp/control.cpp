@@ -26,10 +26,16 @@ int main(int argc, char const **argv) {
         SolveIteratively solveit = ctl.solve_iteratively();
         Model m = solveit.next();
         solveit.close();
+
         std::cout << m << std::endl;
+
         Symbol ex_symb = find_ex_symbol(ctl);
         ctl.assign_external(ex_symb,TruthValue::True);
-        std::cout << m << std::endl;
+        SolveIteratively solveit1 = ctl.solve_iteratively();
+        Model m1= solveit1.next();
+        solveit1.close();
+        std::cout << m1 << std::endl;
+        //std::cout << m << std::endl;
     }
     catch (std::exception const &e) {
         std::cerr << "example failed with: " << e.what() << std::endl;

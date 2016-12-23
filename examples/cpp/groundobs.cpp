@@ -5,16 +5,6 @@
 
 using namespace Clingo;
 
-void solve(Control &ctl) {
-    for (auto m : ctl.solve_iteratively()) {
-        std::cout << "Model:";
-        for (auto &atom : m.symbols()) {
-            std::cout << " " << atom;
-        }
-        std::cout << "\n";
-    };
-}
-
 
 class MyObserver: public GroundProgramObserver {
     virtual void output_atom(Clingo::Symbol symbol, atom_t atom) override {
@@ -34,7 +24,13 @@ int main(int argc, char const **argv) {
         ctl.register_observer(obs);
         ctl.add("base", {}, " q(a). p(a).");
         ctl.ground({{"base", {}}});
-        solve(ctl);
+        //ctl.solve();
+        //ctl.symbolic_atoms();
+        //std:: cout << "OK1" << std::endl;
+        //GroundProgramObserver dummy_obs2;
+        //ctl.register_observer(dummy_obs2, true);
+        //ctl.symbolic_atoms();
+        //std::cout << "OK2";
     }
     catch (std::exception const &e) {
         std::cerr << "example failed with: " << e.what() << std::endl;
