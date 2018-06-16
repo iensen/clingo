@@ -53,7 +53,7 @@ typedef _locale_t  locale_t;
 #define freelocale _free_locale
 inline locale_t    default_locale() { return _create_locale(LC_ALL, "C"); }
 #else
-#include <xlocale.h>
+#include <locale.h>
 inline locale_t    default_locale() { return newlocale(LC_ALL_MASK, "C", 0); }
 #endif
 static struct LocaleHolder {
