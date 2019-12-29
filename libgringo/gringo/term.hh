@@ -1,20 +1,24 @@
-// {{{ GPL License
+// {{{ MIT License
 
-// This file is part of gringo - a grounder for logic programs.
-// Copyright (C) 2013  Roland Kaminski
+// Copyright 2017 Roland Kaminski
 
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal in the Software without restriction, including without limitation the
+// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+// sell copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
 
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+// IN THE SOFTWARE.
 
 // }}}
 
@@ -32,7 +36,11 @@
 #include <gringo/logger.hh>
 #include <memory>
 #include <unordered_set>
-
+#ifdef _MSC_VER
+#pragma warning( push )
+#pragma warning( disable : 4503 ) // decorated name length exceeded
+#pragma warning( disable : 4521 ) // multiple copy constructors specified
+#endif
 namespace Gringo {
 
 // {{{ declaration of UnOp and BinOp
@@ -83,7 +91,7 @@ struct GFunctionTerm;
 struct GLinearTerm;
 using UGTerm = std::unique_ptr<GTerm>;
 using UGFunTerm = std::unique_ptr<GFunctionTerm>;
-struct GTerm : Printable, Hashable, Comparable<GTerm> {
+struct GTerm : Clonable<GTerm>, Printable, Hashable, Comparable<GTerm> {
     using EvalResult = std::pair<bool, Symbol>;
     virtual Sig sig() const = 0;
     virtual EvalResult eval() const = 0;
@@ -127,8 +135,9 @@ struct SimplifyState {
     using DotsMap = std::vector<std::tuple<UTerm, UTerm, UTerm>>;
     using ScriptMap = std::vector<std::tuple<UTerm, String, UTermVec>>;
     SimplifyState(SimplifyState &state)
-    : gen(state.gen) { }
-    SimplifyState() { }
+    : gen(state.gen)
+    , level(state.level + 1) { }
+    SimplifyState() : level(0) { }
     SimplifyState(SimplifyState const &) = delete;
     SimplifyState(SimplifyState &&)      = default;
 
@@ -138,6 +147,7 @@ struct SimplifyState {
     DotsMap dots;
     ScriptMap scripts;
     AuxGen gen;
+    int level;
 };
 
 struct Term : public Printable, public Hashable, public Locatable, public Comparable<Term>, public Clonable<Term> {
@@ -152,7 +162,8 @@ struct Term : public Printable, public Hashable, public Locatable, public Compar
     using ReferenceMap = std::unordered_map<Term*, SGRef, value_hash<Term*>, value_equal_to<Term*>>;
     //! Type that stores for each rewritten arithmetic term (UnopTerm, BinopTerm, LuaTerm) the associated variable and the term itself.
     //! The indices of the vector correspond to the level of the term.
-    using ArithmeticsMap = std::vector<std::unordered_map<UTerm, UTerm, value_hash<UTerm>, value_equal_to<UTerm>>>;
+    using LevelMap = std::unordered_map<UTerm, UTerm, value_hash<UTerm>, value_equal_to<UTerm>>;
+    using ArithmeticsMap = std::vector<std::unique_ptr<LevelMap>>;
     //! The invertibility of a term. This may either be
     //! - CONSTANT for terms that do not contain variables,
     //! - INVERTIBLE for invertible terms (e.g. -X, 1+X, f(X,Y+Z))
@@ -341,6 +352,7 @@ struct GValTerm : GTerm {
     virtual bool unify(GFunctionTerm &x);
     virtual bool unify(GLinearTerm &x);
     virtual bool unify(GVarTerm &x);
+    virtual GValTerm *clone() const { return new GValTerm{val}; }
     virtual ~GValTerm();
 
     Symbol val;
@@ -364,6 +376,11 @@ struct GFunctionTerm : GTerm {
     virtual bool unify(GFunctionTerm &x);
     virtual bool unify(GLinearTerm &x);
     virtual bool unify(GVarTerm &x);
+    virtual GFunctionTerm *clone() const {
+        auto ret = new GFunctionTerm{name, get_clone(args)};
+        ret->sign = sign;
+        return ret;
+    }
     virtual ~GFunctionTerm();
 
     bool sign;
@@ -388,6 +405,7 @@ struct GLinearTerm : GTerm {
     virtual bool unify(GFunctionTerm &x);
     virtual bool unify(GLinearTerm &x);
     virtual bool unify(GVarTerm &x);
+    virtual GLinearTerm *clone() const { return new GLinearTerm{ref, m, n}; }
     virtual ~GLinearTerm();
 
     SGRef ref;
@@ -412,6 +430,7 @@ struct GVarTerm : GTerm {
     virtual bool unify(GFunctionTerm &x);
     virtual bool unify(GLinearTerm &x);
     virtual bool unify(GVarTerm &x);
+    virtual GVarTerm *clone() const { return new GVarTerm{ref}; }
     virtual ~GVarTerm();
 
     SGRef ref;
@@ -822,5 +841,9 @@ void Term::unpoolJoin(Vec &vec, TermUnpool const &f) {
 GRINGO_HASH(Gringo::Term)
 GRINGO_HASH(Gringo::VarTerm)
 GRINGO_HASH(Gringo::GTerm)
+
+#ifdef _MSC_VER
+#pragma warning( pop )
+#endif
 
 #endif // _GRINGO_TERM_HH

@@ -1,20 +1,24 @@
-// {{{ GPL License
+// {{{ MIT License
 
-// This file is part of gringo - a grounder for logic programs.
-// Copyright (C) 2013  Roland Kaminski
+// Copyright 2017 Roland Kaminski
 
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal in the Software without restriction, including without limitation the
+// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+// sell copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
 
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+// IN THE SOFTWARE.
 
 // }}}
 
@@ -22,7 +26,6 @@
 #include <gringo/output/theory.hh>
 #include <gringo/output/aggregates.hh>
 #include <gringo/logger.hh>
-#include <gringo/control.hh>
 
 namespace Gringo { namespace Output {
 
@@ -185,9 +188,9 @@ void External::print(PrintPlain out, char const *prefix) const {
     call(out.domain, head_, &Literal::printPlain, out);
     switch (type_) {
         case Potassco::Value_t::False:   { out << ".\n"; break; }
-        case Potassco::Value_t::True:    { out << "=true.\n"; break; }
-        case Potassco::Value_t::Free:    { out << "=free.\n"; break; }
-        case Potassco::Value_t::Release: { out << "=release.\n"; break; }
+        case Potassco::Value_t::True:    { out << ".[true]\n"; break; }
+        case Potassco::Value_t::Free:    { out << ".[free]\n"; break; }
+        case Potassco::Value_t::Release: { out << ".[release]\n"; break; }
     }
 }
 
@@ -402,7 +405,7 @@ bool Bound::init(DomainData &data, Translator &x, Logger &log) {
                 if      (range_.front()  != std::numeric_limits<int>::min()) { range_.remove(range_.front()+1, std::numeric_limits<int>::max()); }
                 else if (range_.back()+1 != std::numeric_limits<int>::max()) { range_.remove(std::numeric_limits<int>::min(), range_.back()); }
                 else                                                         { range_.clear(), range_.add(0, 1); }
-                GRINGO_REPORT(log, clingo_warning_variable_unbounded)
+                GRINGO_REPORT(log, Warnings::VariableUnbounded)
                     << "warning: unbounded constraint variable:\n"
                     << "  domain of '" << var << "' is set to [" << range_.front() << "," << range_.back() << "]\n"
                     ;
@@ -446,51 +449,37 @@ bool Bound::init(DomainData &data, Translator &x, Logger &log) {
 
 // {{{1 definition of LinearConstraint
 
-void LinearConstraint::Generate::generate(StateVec::iterator it, int current, int remainder) {
-    if (current + remainder > getBound()) {
-        if (it == states.end()) {
-            assert(remainder == 0);
-            aux.emplace_back(data.newAtom());
-            for (auto &x : states) {
-                if (x.atom != x.bound.atoms.end() && x.atom->second) {
-                    Rule()
-                        .addHead({NAF::POS, AtomType::Aux, aux.back(), 0})
-                        .addBody({x.coef < 0 ? NAF::NOT : NAF::POS, AtomType::Aux, x.atom->second, 0})
-                        .translate(data, trans);
+bool LinearConstraint::translate(DomainData &data, Translator &trans) {
+    StateVec states;
+    int current   = 0;
+    // introduces the order variables for each variable
+    for (auto &y : coefs) {
+        states.emplace_back(trans.findBound(y.second), y);
+        current += states.back().lower();
+    }
+    if (current <= bound) {
+        int adjust = 0;
+        LitUintVec body;
+        for (auto &state : states) {
+            if (!state.bound.atoms.empty()) {
+                auto prev = state.bound.begin(), it = prev, ie = state.bound.end();
+                auto atomIt = state.bound.atoms.begin();
+                adjust+= *it * state.coef;
+                for (++it, ++atomIt; it != ie; ++it, ++prev, ++atomIt) {
+                    int diff = state.coef * (*it - *prev);
+                    if (diff > 0) {
+                        body.emplace_back(LiteralId{NAF::POS, AtomType::Aux, atomIt->second, 0}, diff);
+                        adjust += diff;
+                    }
+                    else {
+                        body.emplace_back(LiteralId{NAF::NOT, AtomType::Aux, atomIt->second, 0}, -diff);
+                    }
                 }
             }
         }
-        else {
-            remainder -= it->upper() - it->lower();
-            int total = current - it->lower();
-            for (it->reset(); it->valid(); it->next(total, current)) {
-                generate(it+1, current, remainder);
-                if (current > getBound()) { break; }
-            }
-        }
+        WeightRule{{NAF::POS, AtomType::Aux, atom, 0}, adjust-bound, std::move(body)}.translate(data, trans);
     }
-}
-
-bool LinearConstraint::Generate::init() {
-    int current   = 0;
-    int remainder = 0;
-    for (auto &y : cons.coefs) {
-        states.emplace_back(trans.findBound(y.second), y);
-        current   += states.back().lower();
-        remainder += states.back().upper() - states.back().lower();
-    }
-    if (current <= getBound()) {
-        generate(states.begin(), current, remainder);
-        Rule rule;
-        for (auto &x : aux) { rule.addBody({NAF::POS, AtomType::Aux, x, 0}); }
-        rule.addHead({NAF::POS, AtomType::Aux, cons.atom, 0}).translate(data, trans);
-    }
-    return current <= cons.bound;
-}
-
-bool LinearConstraint::translate(DomainData &data, Translator &x) {
-    Generate gen(*this, data, x);
-    return gen.init();
+    return current <= bound;
 }
 
 // }}}1
@@ -579,7 +568,7 @@ void Translator::outputSymbols(DomainData &data, OutputPredicates const &outPred
         if (!std::get<1>(x).match("", 0, false) && std::get<2>(x)) {
             auto it(seenSigs_.find(std::hash<uint64_t>(), std::equal_to<uint64_t>(), std::get<1>(x).rep()));
             if (!it) {
-                GRINGO_REPORT(log, clingo_warning_atom_undefined)
+                GRINGO_REPORT(log, Warnings::AtomUndefined)
                     << std::get<0>(x) << ": info: no constraint variables over signature occur in program:\n"
                     << "  $" << std::get<1>(x) << "\n";
                 seenSigs_.insert(std::hash<uint64_t>(), std::equal_to<uint64_t>(), std::get<1>(x).rep());
@@ -615,8 +604,8 @@ void Translator::outputSymbols(DomainData &data, OutputPredicates const &outPred
     for (auto &todo : cspOutput_.todo) {
         auto bound = boundMap_.find(todo.term);
         if (bound == boundMap_.end()) {
-            // TODO: clingo_warning_atom_undefined???
-            GRINGO_REPORT(log, clingo_warning_atom_undefined)
+            // TODO: Warnings::AtomUndefined???
+            GRINGO_REPORT(log, Warnings::AtomUndefined)
                 << "info: constraint variable does not occur in program:\n"
                 << "  $" << todo.term << "\n";
             continue;
@@ -662,24 +651,24 @@ void Translator::showCsp(Bound const &bound, IsTrueLookup isTrue, SymVec &atoms)
 }
 
 void Translator::atoms(DomainData &data, unsigned atomset, IsTrueLookup isTrue, SymVec &atoms, OutputPredicates const &outPreds) {
-    auto isComp = [isTrue, atomset](unsigned x) { return (atomset & clingo_show_type_complement) ? !isTrue(x) : isTrue(x); };
-    if (atomset & (clingo_show_type_csp | clingo_show_type_shown)) {
+    auto isComp = [isTrue, atomset](unsigned x) { return (atomset & static_cast<unsigned>(ShowType::Complement)) ? !isTrue(x) : isTrue(x); };
+    if (atomset & (static_cast<unsigned>(ShowType::Csp) | static_cast<unsigned>(ShowType::Shown))) {
         for (auto &x : boundMap_) {
-            if (atomset & clingo_show_type_csp || (atomset & clingo_show_type_shown && showBound(outPreds, x))) { showCsp(x, isTrue, atoms); }
+            if (atomset & static_cast<unsigned>(ShowType::Csp) || (atomset & static_cast<unsigned>(ShowType::Shown) && showBound(outPreds, x))) { showCsp(x, isTrue, atoms); }
         }
     }
-    if (atomset & (clingo_show_type_atoms | clingo_show_type_shown)) {
+    if (atomset & (static_cast<unsigned>(ShowType::Atoms) | static_cast<unsigned>(ShowType::Shown))) {
         for (auto &x : data.predDoms()) {
             Sig sig = *x;
             auto name = sig.name();
-            if (((atomset & clingo_show_type_atoms || (atomset & clingo_show_type_shown && showSig(outPreds, sig, false))) && !name.empty() && !name.startsWith("#"))) {
+            if (((atomset & static_cast<unsigned>(ShowType::Atoms) || (atomset & static_cast<unsigned>(ShowType::Shown) && showSig(outPreds, sig, false))) && !name.empty() && !name.startsWith("#"))) {
                 for (auto &y: *x) {
                     if (y.defined() && y.hasUid() && isComp(y.uid())) { atoms.emplace_back(y); }
                 }
             }
         }
     }
-    if (atomset & clingo_show_type_shown) {
+    if (atomset & static_cast<unsigned>(ShowType::Shown)) {
         for (auto &entry : cspOutput_.table) {
             auto bound = boundMap_.find(entry.term);
             if (bound != boundMap_.end() && !showBound(outPreds, *bound) && call(data, entry.cond, &Literal::isTrue, isComp)) {
@@ -687,7 +676,7 @@ void Translator::atoms(DomainData &data, unsigned atomset, IsTrueLookup isTrue, 
             }
         }
     }
-    if (atomset & (clingo_show_type_terms | clingo_show_type_shown)) {
+    if (atomset & (static_cast<unsigned>(ShowType::Terms) | static_cast<unsigned>(ShowType::Shown))) {
         for (auto &entry : termOutput_.table) {
             if (isComp(call(data, entry.cond, &Literal::uid))) {
                 atoms.emplace_back(entry.term);
@@ -751,8 +740,8 @@ void Translator::showAtom(DomainData &data, PredDomMap::Iterator it) {
         if (jt->defined()) {
             LitVec cond;
             if (!jt->fact()) {
-                Potassco::Id_t domain = it - data.predDoms().begin();
-                Potassco::Id_t offset = jt - (*it)->begin();
+                Potassco::Id_t domain = numeric_cast<Potassco::Id_t>(it - data.predDoms().begin());
+                Potassco::Id_t offset = numeric_cast<Potassco::Id_t>(jt - (*it)->begin());
                 cond.emplace_back(NAF::POS, AtomType::Predicate, offset, domain);
             }
             Atomtab(jt).translate(data, *this);

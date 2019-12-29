@@ -17,7 +17,7 @@ def on_model(x):
 
 def on_finish(ret):
     writeln("Answer: 42")
-    writeln(str(ret) + "_" + str(ret.interrupted).lower())
+    writeln("on_finish")
 
 def main (prg):
     n = prg.get_const("n").number
@@ -31,9 +31,9 @@ def main (prg):
         parts.append(("cumulative", [i]))
         prg.ground(parts)
         parts = []
-        f = prg.solve_async(on_model, on_finish)
-        f.wait(0)
-        ret = f.get()
+        with prg.solve(on_model=on_model, on_finish=on_finish, async_=True) as handle:
+            handle.wait(0)
+            ret = handle.get()
         writeln("Answer: 42")
         writeln(ret)
 

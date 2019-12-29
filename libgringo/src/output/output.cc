@@ -1,20 +1,24 @@
-// {{{ GPL License
+// {{{ MIT License
 
-// This file is part of gringo - a grounder for logic programs.
-// Copyright (C) 2013  Roland Kaminski
+// Copyright 2017 Roland Kaminski
 
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal in the Software without restriction, including without limitation the
+// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+// sell copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
 
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+// IN THE SOFTWARE.
 
 // }}}
 
@@ -82,17 +86,13 @@ void translateLambda(DomainData &data, AbstractOutput &out, T const &lambda) {
     TranslateStatement<T>(lambda).passTo(data, out);
 }
 
-// {{{2 definition of EndStepStatement
+// {{{2 definition of EndGroundStatement
 
-class EndStepStatement : public Statement {
+class EndGroundStatement : public Statement {
 public:
-    EndStepStatement(OutputPredicates const &outPreds, bool solve, Logger &log)
-    : outPreds_(outPreds), log_(log), solve_(solve) { }
-    void output(DomainData &, UBackend &out) const override {
-        if (solve_) {
-            out->endStep();
-        }
-    }
+    EndGroundStatement(OutputPredicates const &outPreds, Logger &log)
+    : outPreds_(outPreds), log_(log) { }
+    void output(DomainData &, UBackend &) const override { }
     void print(PrintPlain out, char const *prefix) const override {
         for (auto &x : outPreds_) {
             if (std::get<1>(x).match("", 0)) { out << prefix << "#show.\n"; }
@@ -104,11 +104,10 @@ public:
         trans.output(data, *this);
     }
     void replaceDelayed(DomainData &, LitVec &) override { }
-    virtual ~EndStepStatement() { }
+    virtual ~EndGroundStatement() { }
 private:
     OutputPredicates const &outPreds_;
     Logger &log_;
-    bool solve_;
 };
 
 // }}}2
@@ -275,32 +274,63 @@ void OutputBase::output(Statement &x) {
     out_->output(data, x);
 }
 
-void OutputBase::flush() {
-    for (auto &lit : delayed_) { DelayedStatement(lit).passTo(data, *out_); }
-    delayed_.clear();
-    backendLambda(data, *out_, [](DomainData &data, UBackend &out) {
-        auto getCond = [&data](Id_t elem) {
-            TheoryData &td = data.theory();
-            BackendLitVec bc;
-            for (auto &lit : td.getCondition(elem)) {
-                bc.emplace_back(call(data, lit, &Literal::uid));
-            }
-            return bc;
-        };
-        Gringo::output(data.theory().data(), *out, getCond);
-    });
-}
-
 void OutputBase::beginStep() {
     backendLambda(data, *out_, [](DomainData &, UBackend &out) { out->beginStep(); });
 }
 
-void OutputBase::endStep(bool solve, Logger &log) {
+namespace {
+
+class BackendTheoryOutput : public TheoryOutput {
+public:
+    BackendTheoryOutput(DomainData &data, AbstractOutput &out)
+    : data_{data}
+    , out_{out} {
+    }
+private:
+    void theoryTerm(Id_t termId, int number) override {
+        backendLambda(data_, out_, [&](DomainData &, UBackend &out) { out->theoryTerm(termId, number); });
+    }
+    void theoryTerm(Id_t termId, const StringSpan& name) override {
+        backendLambda(data_, out_, [&](DomainData &, UBackend &out) { out->theoryTerm(termId, name); });
+    }
+    void theoryTerm(Id_t termId, int cId, const IdSpan& args) override {
+        backendLambda(data_, out_, [&](DomainData &, UBackend &out) { out->theoryTerm(termId, cId, args); });
+    }
+    void theoryElement(Id_t elementId, IdSpan const & terms, LitVec const &cond) override {
+        backendLambda(data_, out_, [&](DomainData &, UBackend &out) {
+            BackendLitVec bc;
+            bc.reserve(cond.size());
+            for (auto &lit : cond) {
+                bc.emplace_back(call(data_, lit, &Literal::uid));
+            }
+            out->theoryElement(elementId, terms, Potassco::toSpan(bc));
+        });
+    }
+    void theoryAtom(Id_t atomOrZero, Id_t termId, const IdSpan& elements) override {
+        backendLambda(data_, out_, [&](DomainData &, UBackend &out) { out->theoryAtom(atomOrZero, termId, elements); });
+    }
+    void theoryAtom(Id_t atomOrZero, Id_t termId, const IdSpan& elements, Id_t op, Id_t rhs) override {
+        backendLambda(data_, out_, [&](DomainData &, UBackend &out) { out->theoryAtom(atomOrZero, termId, elements, op, rhs); });
+    }
+private:
+    DomainData &data_;
+    AbstractOutput &out_;
+};
+
+} // namespace
+
+void OutputBase::endGround(Logger &log) {
+    for (auto &lit : delayed_) { DelayedStatement(lit).passTo(data, *out_); }
+    delayed_.clear();
+
+    BackendTheoryOutput bto{data, *out_};
+    data.theory().output(bto);
+
     if (!outPreds.empty()) {
         std::move(outPredsForce.begin(), outPredsForce.end(), std::back_inserter(outPreds));
         outPredsForce.clear();
     }
-    EndStepStatement(outPreds, solve, log).passTo(data, *out_);
+    EndGroundStatement(outPreds, log).passTo(data, *out_);
     // TODO: get rid of such things #d domains should be stored somewhere else
     std::set<Sig> rm;
     for (auto &x : predDoms()) {
@@ -313,6 +343,13 @@ void OutputBase::endStep(bool solve, Logger &log) {
             return rm.find(dom->sig()) != rm.end();
         });
     }
+}
+
+void OutputBase::endStep(Assumptions const &ass) {
+    if (ass.size > 0) {
+        if (auto b = backend_()) { b->assume(ass); }
+    }
+    backendLambda(data, *out_, [](DomainData &, UBackend &out) { out->endStep(); });
 }
 
 void OutputBase::reset(bool resetData) {
@@ -334,7 +371,7 @@ void OutputBase::checkOutPreds(Logger &log) {
         if (!std::get<1>(x).match("", 0) && !std::get<2>(x)) {
             auto it(predDoms().find(std::get<1>(x)));
             if (it == predDoms().end()) {
-                GRINGO_REPORT(log, clingo_warning_atom_undefined)
+                GRINGO_REPORT(log, Warnings::AtomUndefined)
                     << std::get<0>(x) << ": info: no atoms over signature occur in program:\n"
                     << "  " << std::get<1>(x) << "\n";
             }
@@ -370,7 +407,6 @@ std::pair<PredicateDomain::Iterator, PredicateDomain*> OutputBase::find(Symbol v
 std::pair<Id_t, Id_t> OutputBase::simplify(AssignmentLookup assignment) {
     Id_t facts = 0;
     Id_t deleted = 0;
-    if (true) {
     if (data.canSimplify()) {
         std::vector<Mapping> mappings;
         for (auto &dom : data.predDoms()) {
@@ -381,14 +417,21 @@ std::pair<Id_t, Id_t> OutputBase::simplify(AssignmentLookup assignment) {
         }
         translateLambda(data, *out_, [&](DomainData &data, Translator &trans) { trans.simplify(data, mappings, assignment); });
     }
-    }
     return {facts, deleted};
 }
 
-Backend *OutputBase::backend() {
+Backend *OutputBase::backend_() {
     Backend *backend = nullptr;
     backendLambda(data, *out_, [&backend](DomainData &, UBackend &out) { backend = out.get(); });
     return backend;
+}
+
+Backend *OutputBase::backend(Logger &logger) {
+    for (auto &dom : predDoms()) {
+        dom->incNext();
+    }
+    checkOutPreds(logger);
+    return backend_();
 }
 
 namespace {

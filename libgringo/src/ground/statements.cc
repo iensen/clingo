@@ -1,20 +1,24 @@
-// {{{ GPL License
+// {{{ MIT License
 
-// This file is part of gringo - a grounder for logic programs.
-// Copyright (C) 2013  Roland Kaminski
+// Copyright 2017 Roland Kaminski
 
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal in the Software without restriction, including without limitation the
+// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+// sell copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
 
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+// IN THE SOFTWARE.
 
 // }}}
 
@@ -70,7 +74,7 @@ struct Ent {
 };
 using SC  = SafetyChecker<unsigned, Ent>;
 
-InstVec _linearize(Logger &log, Scripts &scripts, bool positive, SolutionCallback &cb, Term::VarSet &&important, ULitVec const &lits, Term::VarSet boundInitially = Term::VarSet()) {
+InstVec _linearize(Logger &log, Context &context, bool positive, SolutionCallback &cb, Term::VarSet &&important, ULitVec const &lits, Term::VarSet boundInitially = Term::VarSet()) {
     InstVec insts;
     std::vector<unsigned> rec;
     std::vector<std::vector<std::pair<BinderType,Literal*>>> todo{1};
@@ -108,7 +112,7 @@ InstVec _linearize(Logger &log, Scripts &scripts, bool positive, SolutionCallbac
                 if (bound.find(occ.first->name) == bound.end()) {
                     auto &varNode(varMap[occ.first->name]);
                     if (!varNode)   {
-                        varNode = &s.insertVar(boundBy.size());
+                        varNode = &s.insertVar(numeric_cast<unsigned>(boundBy.size()));
                         boundBy.emplace_back(occ.first->name, std::vector<unsigned>{});
                     }
                     if (occ.second) { s.insertEdge(entNode, *varNode); }
@@ -143,7 +147,7 @@ InstVec _linearize(Logger &log, Scripts &scripts, bool positive, SolutionCallbac
                 }
                 else { y->data.depends.insert(y->data.depends.end(), bb.second.begin(), bb.second.end()); }
             }
-            auto index(y->data.lit.index(scripts, y->data.type, bound));
+            auto index(y->data.lit.index(context, y->data.type, bound));
             if (auto update = index->getUpdater()) {
                 if (BodyOcc *occ = y->data.lit.occurrence()) {
                     for (HeadOccurrence &x : occ->definedBy()) { x.defines(*update, y->data.type == BinderType::NEW ? &insts.back() : nullptr); }
@@ -224,7 +228,7 @@ HeadDefinition::HeadDefinition(UTerm &&repr, Domain *domain)
 , domain_(domain) { }
 
 void HeadDefinition::defines(IndexUpdater &update, Instantiator *inst) {
-    auto ret(offsets_.emplace(&update, enqueueVec_.size()));
+    auto ret(offsets_.emplace(&update, numeric_cast<unsigned>(enqueueVec_.size())));
     if (ret.second) { enqueueVec_.emplace_back(&update, RInstVec{}); }
     if (active_ && inst) { enqueueVec_[ret.first->second].second.emplace_back(*inst); }
 }
@@ -284,10 +288,10 @@ void AbstractStatement::startLinearize(bool active) {
 void AbstractStatement::collectImportant(Term::VarSet &vars) {
     def_.collectImportant(vars);
 }
-void AbstractStatement::linearize(Scripts &scripts, bool positive, Logger &log) {
+void AbstractStatement::linearize(Context &context, bool positive, Logger &log) {
     Term::VarSet important;
     collectImportant(important);
-    insts_ = _linearize(log, scripts, positive, *this, std::move(important), lits_);
+    insts_ = _linearize(log, context, positive, *this, std::move(important), lits_);
 }
 
 void AbstractStatement::enqueue(Queue &q) {
@@ -335,7 +339,7 @@ void ExternalRule::startLinearize(bool active) {
     def_.setActive(active);
 }
 
-void ExternalRule::linearize(Scripts &, bool, Logger &) { }
+void ExternalRule::linearize(Context &, bool, Logger &) { }
 
 void ExternalRule::enqueue(Queue &) { }
 
@@ -345,11 +349,10 @@ void ExternalRule::print(std::ostream &out) const {
 
 ExternalRule::~ExternalRule() noexcept = default;
 
-//{{{1 definition of Rule
+//{{{1 definition of AbstractRule
 
-Rule::Rule(HeadVec &&heads, ULitVec &&lits, RuleType type)
-: lits_(std::move(lits))
-, type_(type) {
+AbstractRule::AbstractRule(HeadVec &&heads, ULitVec &&lits)
+: lits_(std::move(lits)) {
     defs_.reserve(heads.size());
     for (auto &head : heads) {
         assert(head.first && head.second);
@@ -357,65 +360,9 @@ Rule::Rule(HeadVec &&heads, ULitVec &&lits, RuleType type)
     }
 }
 
-Rule::~Rule() noexcept = default;
+AbstractRule::~AbstractRule() noexcept = default;
 
-void Rule::report(Output::OutputBase &out, Logger &log) {
-    if (type_ == RuleType::External) {
-        for (auto &def : defs_) {
-            bool undefined = false;
-            Symbol val(def.domRepr()->eval(undefined, log));
-            if (!undefined) {
-                auto &dom = static_cast<PredicateDomain&>(def.dom());
-                auto ret = dom.define(val, false);
-                Potassco::Id_t offset = static_cast<Potassco::Id_t>(std::get<0>(ret) - dom.begin());
-                std::get<0>(ret)->setExternal(true);
-                Output::External external({NAF::POS, Output::AtomType::Predicate, offset, dom.domainOffset()}, Potassco::Value_t::False);
-                out.output(external);
-            }
-        }
-    }
-    else {
-        bool choice = type_ == RuleType::Choice;
-        Output::Rule &rule(out.tempRule(choice));
-        bool fact = true;
-        for (auto &x : lits_) {
-            if (x->auxiliary()) { continue; }
-            auto ret = x->toOutput(log);
-            if (ret.first.valid() && (out.keepFacts || !ret.second)) {
-                rule.addBody(ret.first);
-            }
-            if (!ret.second) { fact = false; }
-        }
-        for (auto &def : defs_) {
-            bool undefined = false;
-            Symbol val = def.domRepr()->eval(undefined, log);
-            if (undefined) {
-                if (choice) { continue; }
-                else        { return; }
-            }
-            auto &dom = static_cast<PredicateDomain&>(def.dom());
-            auto ret(dom.define(val));
-            if (!ret.first->fact()) {
-                Potassco::Id_t offset = static_cast<Potassco::Id_t>(ret.first - dom.begin());
-                rule.addHead({NAF::POS, Output::AtomType::Predicate, offset, dom.domainOffset()});
-            }
-            else if (!choice) { return; }
-        }
-        if (choice && rule.numHeads() == 0) { return; }
-        if (!choice && fact && rule.numHeads() == 1) {
-            Output::LiteralId head = rule.heads().front();
-            auto &dom = *out.predDoms()[head.domain()];
-            dom[head.offset()].setFact(true);
-        }
-        out.output(rule);
-    }
-}
-
-bool Rule::isNormal() const {
-    return defs_.size() == 1 && type_ == RuleType::Disjunctive;
-}
-
-void Rule::analyze(Dep::Node &node, Dep &dep) {
+void AbstractRule::analyze(Dep::Node &node, Dep &dep) {
     for (auto &def : defs_) { def.analyze(node, dep); }
     for (auto &x : lits_) {
         auto occ(x->occurrence());
@@ -423,47 +370,159 @@ void Rule::analyze(Dep::Node &node, Dep &dep) {
     }
 }
 
-void Rule::startLinearize(bool active) {
+void AbstractRule::startLinearize(bool active) {
     for (auto &def : defs_) { def.setActive(active); }
     if (active) { insts_.clear(); }
 }
 
-void Rule::linearize(Scripts &scripts, bool positive, Logger &log) {
+void AbstractRule::linearize(Context &context, bool positive, Logger &log) {
     Term::VarSet important;
     for (auto &def : defs_) { def.collectImportant(important); }
-    insts_ = _linearize(log, scripts, positive, *this, std::move(important), lits_);
+    insts_ = _linearize(log, context, positive, *this, std::move(important), lits_);
 }
 
-void Rule::enqueue(Queue &q) {
+void AbstractRule::enqueue(Queue &q) {
     for (auto &def : defs_) { def.init(); }
     for (auto &x : insts_) { x.enqueue(q); }
 }
 
-void Rule::printHead(std::ostream &out) const {
-    if (type_ == RuleType::External) { out << "#external "; }
-    if (type_ == RuleType::Choice) { out << "{"; }
-    if (type_ == RuleType::Disjunctive && defs_.empty()) { out << "#false"; }
+void AbstractRule::propagate(Queue &queue) {
+    for (auto &def : defs_) { def.enqueue(queue); }
+}
+
+//{{{1 definition of Rule
+
+template <bool disjunctive>
+Rule<disjunctive>::Rule(HeadVec &&heads, ULitVec &&lits)
+: AbstractRule(std::move(heads), std::move(lits)) { }
+
+template <bool disjunctive>
+Rule<disjunctive>::~Rule() noexcept = default;
+
+template <bool disjunctive>
+void Rule<disjunctive>::printHead(std::ostream &out) const {
+    if (!disjunctive)       { out << "{"; }
+    else if (defs_.empty()) { out << "#false"; }
     bool sep = false;
     for (auto &def : defs_) {
         if (sep) { out << ";"; }
         else { sep = true; }
         out << *def.domRepr();
     }
-    if (type_ == RuleType::Choice) { out << "}"; }
+    if (!disjunctive) { out << "}"; }
 }
 
-void Rule::print(std::ostream &out) const {
+template <bool disjunctive>
+void Rule<disjunctive>::print(std::ostream &out) const {
     printHead(out);
     if (!lits_.empty()) {
-        out << (type_ == RuleType::External ? ":" : ":-");
+        out << ":-";
         out << lits_;
     }
     out << ".";
 }
 
-void Rule::propagate(Queue &queue) {
-    for (auto &def : defs_) { def.enqueue(queue); }
+template <bool disjunctive>
+bool Rule<disjunctive>::isNormal() const {
+    return defs_.size() == 1 && disjunctive;
 }
+
+template <bool disjunctive>
+void Rule<disjunctive>::report(Output::OutputBase &out, Logger &log) {
+    Output::Rule &rule(out.tempRule(!disjunctive));
+    bool fact = true;
+    for (auto &x : lits_) {
+        if (x->auxiliary()) { continue; }
+        auto ret = x->toOutput(log);
+        if (ret.first.valid() && (out.keepFacts || !ret.second)) {
+            rule.addBody(ret.first);
+        }
+        if (!ret.second) { fact = false; }
+    }
+    for (auto &def : defs_) {
+        bool undefined = false;
+        Symbol val = def.domRepr()->eval(undefined, log);
+        if (undefined) {
+            if (!disjunctive) { continue; }
+            else              { return; }
+        }
+        auto &dom = static_cast<PredicateDomain&>(def.dom());
+        auto ret(dom.define(val));
+        if (!ret.first->fact()) {
+            Potassco::Id_t offset = static_cast<Potassco::Id_t>(ret.first - dom.begin());
+            rule.addHead({NAF::POS, Output::AtomType::Predicate, offset, dom.domainOffset()});
+        }
+        else if (!!disjunctive) { return; }
+    }
+    if (!disjunctive && rule.numHeads() == 0) { return; }
+    if (!!disjunctive && fact && rule.numHeads() == 1) {
+        Output::LiteralId head = rule.heads().front();
+        auto &dom = *out.predDoms()[head.domain()];
+        dom[head.offset()].setFact(true);
+    }
+    out.output(rule);
+}
+
+template class Rule<true>;
+template class Rule<false>;
+
+//{{{1 definition of ExternalStatement
+
+ExternalStatement::ExternalStatement(HeadVec &&heads, ULitVec &&lits, UTerm &&type)
+: AbstractRule(std::move(heads), std::move(lits))
+, type_(std::move(type)) { }
+
+ExternalStatement::~ExternalStatement() noexcept = default;
+
+void ExternalStatement::printHead(std::ostream &out) const {
+    out << "#external ";
+    bool sep = false;
+    for (auto &def : defs_) {
+        if (sep) { out << ";"; }
+        else { sep = true; }
+        out << *def.domRepr();
+    }
+}
+
+void ExternalStatement::print(std::ostream &out) const {
+    printHead(out);
+    if (!lits_.empty()) {
+        out << ":";
+        out << lits_;
+    }
+    out << ".";
+}
+
+bool ExternalStatement::isNormal() const {
+    return false;
+}
+
+void ExternalStatement::report(Output::OutputBase &out, Logger &log) {
+    for (auto &def : defs_) {
+        bool undefined = false;
+        Symbol val(def.domRepr()->eval(undefined, log));
+        if (undefined) { continue; }
+        Gringo::Symbol term = type_->eval(undefined, log);
+        if (undefined) { continue; }
+        bool id = term.type() == Gringo::SymbolType::Fun && term.arity() == 0;
+        Potassco::Value_t value;
+        if (id && term.name() == "false")         { value = Potassco::Value_t::False; }
+        else if (id && term.name() == "true")     { value = Potassco::Value_t::True; }
+        else if (id && term.name() == "free")     { value = Potassco::Value_t::Free; }
+        else if (id && term.name() == "release")  { value = Potassco::Value_t::Release; }
+        else {
+            // TODO: report something
+            continue;
+        }
+        auto &dom = static_cast<PredicateDomain&>(def.dom());
+        auto ret = dom.define(val, false);
+        Potassco::Id_t offset = static_cast<Potassco::Id_t>(std::get<0>(ret) - dom.begin());
+        std::get<0>(ret)->setExternal(true);
+        Output::External external({NAF::POS, Output::AtomType::Predicate, offset, dom.domainOffset()}, value);
+        out.output(external);
+    }
+}
+
 
 // }}}1
 
@@ -488,7 +547,7 @@ void ShowStatement::report(Output::OutputBase &out, Logger &log) {
         out.output(ss);
     }
     else {
-        GRINGO_REPORT(log, clingo_warning_operation_undefined)
+        GRINGO_REPORT(log, Warnings::OperationUndefined)
             << term_->loc() << ": info: tuple ignored:\n"
             << "  " << term << "\n";
     }
@@ -522,13 +581,13 @@ void EdgeStatement::report(Output::OutputBase &out, Logger &log) {
     bool undefined = false;
     Symbol u = u_->eval(undefined, log);
     if (undefined) {
-        GRINGO_REPORT(log, clingo_warning_operation_undefined)
+        GRINGO_REPORT(log, Warnings::OperationUndefined)
             << u_->loc() << ": info: edge ignored\n";
         return;
     }
     Symbol v = v_->eval(undefined, log);
     if (undefined) {
-        GRINGO_REPORT(log, clingo_warning_operation_undefined)
+        GRINGO_REPORT(log, Warnings::OperationUndefined)
             << v_->loc() << ": info: edge ignored\n";
         return;
     }
@@ -572,7 +631,7 @@ void ProjectStatement::report(Output::OutputBase &out, Logger &log) {
     auto domain = out.data.predDoms().find(term.sig());
     assert(domain != out.data.predDoms().end());
     auto atom = (*domain)->find(term);
-    Id_t offset = atom - (*domain)->begin();
+    Id_t offset = numeric_cast<Id_t>(atom - (*domain)->begin());
     Output::ProjectStatement ps(Output::LiteralId{NAF::POS, Output::AtomType::Predicate, offset, (*domain)->domainOffset()});
     out.output(ps);
 }
@@ -615,14 +674,14 @@ void HeuristicStatement::report(Output::OutputBase &out, Logger &log) {
     // check value
     Symbol value = value_->eval(undefined, log);
     if (undefined || value.type() != SymbolType::Num) {
-        GRINGO_REPORT(log, clingo_warning_operation_undefined)
+        GRINGO_REPORT(log, Warnings::OperationUndefined)
             << value_->loc() << ": info: heuristic directive ignored\n";
         return;
     }
     // check priority
     Symbol priority = priority_->eval(undefined, log);
     if (undefined || priority.type() != SymbolType::Num || priority.num() < 0) {
-        GRINGO_REPORT(log, clingo_warning_operation_undefined)
+        GRINGO_REPORT(log, Warnings::OperationUndefined)
             << priority_->loc() << ": info: heuristic directive ignored\n";
         return;
     }
@@ -637,7 +696,7 @@ void HeuristicStatement::report(Output::OutputBase &out, Logger &log) {
     else if (mod == Symbol::createId("init"))   { heuMod = Potassco::Heuristic_t::Init; }
     else if (mod == Symbol::createId("sign"))   { heuMod = Potassco::Heuristic_t::Sign; }
     else {
-        GRINGO_REPORT(log, clingo_warning_operation_undefined)
+        GRINGO_REPORT(log, Warnings::OperationUndefined)
             << mod_->loc() << ": info: heuristic directive ignored\n";
         return;
     }
@@ -648,7 +707,7 @@ void HeuristicStatement::report(Output::OutputBase &out, Logger &log) {
         auto lit = x->toOutput(log);
         if (!lit.second) { cond.emplace_back(lit.first); }
     }
-    Id_t offset = atom - (*domain)->begin();
+    Id_t offset = numeric_cast<Id_t>(atom - (*domain)->begin());
     auto atomId = Output::LiteralId{NAF::POS, Output::AtomType::Predicate, offset, (*domain)->domainOffset()};
     Output::HeuristicStatement hs(atomId, value.num(), priority.num(), heuMod, cond);
     out.output(hs);
@@ -694,7 +753,7 @@ void WeakConstraint::report(Output::OutputBase &out, Logger &log) {
         out.output(min);
     }
     else if (!undefined) {
-        GRINGO_REPORT(log, clingo_warning_operation_undefined)
+        GRINGO_REPORT(log, Warnings::OperationUndefined)
             << tuple_.front()->loc() << ": info: tuple ignored:\n"
             << "  " << out.tempVals_.front() << "@" << out.tempVals_[1] << "\n";
     }
@@ -764,7 +823,7 @@ void BodyAggregateComplete::startLinearize(bool active) {
     if (active) { inst_ = Instantiator(*this); }
 }
 
-void BodyAggregateComplete::linearize(Scripts &, bool, Logger &) {
+void BodyAggregateComplete::linearize(Context &, bool, Logger &) {
     auto binder  = gringo_make_unique<BindOnce>();
     for (HeadOccurrence &x : defBy_) { x.defines(*binder->getUpdater(), &inst_); }
     inst_.add(std::move(binder), Instantiator::DependVec{});
@@ -833,7 +892,7 @@ void BodyAggregateComplete::checkDefined(LocSet &, SigSet const &, UndefVec &) c
 void BodyAggregateComplete::enqueue(BodyAggregateDomain::Iterator atom) {
     if (!atom->defined() && !atom->enqueued()) {
         atom->setEnqueued(true);
-        todo_.emplace_back(atom - dom().begin());
+        todo_.emplace_back(numeric_cast<TodoVec::value_type>(atom - dom().begin()));
     }
 }
 
@@ -877,8 +936,8 @@ void BodyAggregateAccumulate::report(Output::OutputBase &out, Logger &log) {
     }
 }
 
-void BodyAggregateAccumulate::linearize(Scripts &scripts, bool positive, Logger &log) {
-    AbstractStatement::linearize(scripts, positive, log);
+void BodyAggregateAccumulate::linearize(Context &context, bool positive, Logger &log) {
+    AbstractStatement::linearize(context, positive, log);
     if (isOutputRecursive()) { complete_.setOutputRecursive(); }
 }
 
@@ -888,9 +947,10 @@ void BodyAggregateAccumulate::printHead(std::ostream &out) const {
 
 // {{{1 definition of BodyAggregateLiteral
 
-BodyAggregateLiteral::BodyAggregateLiteral(BodyAggregateComplete &complete, NAF naf)
+BodyAggregateLiteral::BodyAggregateLiteral(BodyAggregateComplete &complete, NAF naf, bool auxiliary)
 : complete_(complete)
-, naf_(naf) { }
+, naf_(naf)
+, auxiliary_(auxiliary) { }
 
 BodyAggregateLiteral::~BodyAggregateLiteral() noexcept = default;
 
@@ -947,7 +1007,7 @@ void BodyAggregateLiteral::collect(VarTermBoundVec &vars) const {
     complete_.domRepr()->collect(vars, naf_ == NAF::POS);
 }
 
-UIdx BodyAggregateLiteral::index(Scripts &, BinderType type, Term::VarSet &bound) {
+UIdx BodyAggregateLiteral::index(Context &, BinderType type, Term::VarSet &bound) {
     return make_binder(complete_.dom(), naf_, *complete_.domRepr(), offset_, type, isRecursive(), bound, 0);
 }
 
@@ -1004,7 +1064,7 @@ void AssignmentAggregateComplete::startLinearize(bool active) {
     if (active) { inst_ = Instantiator(*this); }
 }
 
-void AssignmentAggregateComplete::linearize(Scripts &, bool, Logger &) {
+void AssignmentAggregateComplete::linearize(Context &, bool, Logger &) {
     auto binder  = gringo_make_unique<BindOnce>();
     for (HeadOccurrence &x : defBy_) { x.defines(*binder->getUpdater(), &inst_); }
     inst_.add(std::move(binder), Instantiator::DependVec{});
@@ -1101,8 +1161,8 @@ AssignmentAggregateAccumulate::AssignmentAggregateAccumulate(AssignmentAggregate
 
 AssignmentAggregateAccumulate::~AssignmentAggregateAccumulate() noexcept = default;
 
-void AssignmentAggregateAccumulate::linearize(Scripts &scripts, bool positive, Logger &log) {
-    AbstractStatement::linearize(scripts, positive, log);
+void AssignmentAggregateAccumulate::linearize(Context &context, bool positive, Logger &log) {
+    AbstractStatement::linearize(context, positive, log);
     if (isOutputRecursive()) { complete_.setOutputRecursive(); }
 }
 
@@ -1138,8 +1198,9 @@ void AssignmentAggregateAccumulate::printHead(std::ostream &out) const {
 
 // {{{1 Definition of AssignmentAggregateLiteral
 
-AssignmentAggregateLiteral::AssignmentAggregateLiteral(AssignmentAggregateComplete &complete)
-: complete_(complete) { }
+AssignmentAggregateLiteral::AssignmentAggregateLiteral(AssignmentAggregateComplete &complete, bool auxiliary)
+: complete_(complete)
+, auxiliary_(auxiliary) { }
 
 AssignmentAggregateLiteral::~AssignmentAggregateLiteral() noexcept = default;
 
@@ -1186,7 +1247,7 @@ void AssignmentAggregateLiteral::collect(VarTermBoundVec &vars) const {
     complete_.domRepr()->collect(vars, true);
 }
 
-UIdx AssignmentAggregateLiteral::index(Scripts &, BinderType type, Term::VarSet &bound) {
+UIdx AssignmentAggregateLiteral::index(Context &, BinderType type, Term::VarSet &bound) {
     return make_binder(complete_.dom(), NAF::POS, *complete_.domRepr(), offset_, type, isRecursive(), bound, 0);
 }
 
@@ -1206,8 +1267,9 @@ std::pair<Output::LiteralId,bool> AssignmentAggregateLiteral::toOutput(Logger &)
 
 // {{{1 definition of ConjunctionLiteral
 
-ConjunctionLiteral::ConjunctionLiteral(ConjunctionComplete &complete)
-: complete_(complete) { }
+ConjunctionLiteral::ConjunctionLiteral(ConjunctionComplete &complete, bool auxiliary)
+: complete_(complete)
+, auxiliary_(auxiliary) { }
 
 ConjunctionLiteral::~ConjunctionLiteral() noexcept = default;
 
@@ -1254,7 +1316,7 @@ void ConjunctionLiteral::collect(VarTermBoundVec &vars) const {
     complete_.domRepr()->collect(vars, true);
 }
 
-UIdx ConjunctionLiteral::index(Scripts &, BinderType type, Term::VarSet &bound) {
+UIdx ConjunctionLiteral::index(Context &, BinderType type, Term::VarSet &bound) {
     return make_binder(complete_.dom(), NAF::POS, *complete_.domRepr(), offset_, type, isRecursive(), bound, 0);
 }
 
@@ -1299,9 +1361,17 @@ ConjunctionAccumulateCond::ConjunctionAccumulateCond(ConjunctionComplete &comple
 
 ConjunctionAccumulateCond::~ConjunctionAccumulateCond() noexcept = default;
 
-void ConjunctionAccumulateCond::linearize(Scripts &scripts, bool positive, Logger &log) {
-    AbstractStatement::linearize(scripts, positive, log);
+void ConjunctionAccumulateCond::linearize(Context &context, bool positive, Logger &log) {
+    AbstractStatement::linearize(context, positive, log);
     if (isOutputRecursive()) { complete_.setCondRecursive(); }
+}
+
+void ConjunctionAccumulateCond::analyze(Dep::Node &node, Dep &dep) {
+    def_.analyze(node, dep);
+    for (auto &x : lits_) {
+        auto occ(x->occurrence());
+        if (occ) { dep.depends(node, *occ, true); }
+    }
 }
 
 bool ConjunctionAccumulateCond::isNormal() const {
@@ -1333,8 +1403,8 @@ ConjunctionAccumulateHead::ConjunctionAccumulateHead(ConjunctionComplete &comple
 
 ConjunctionAccumulateHead::~ConjunctionAccumulateHead() noexcept = default;
 
-void ConjunctionAccumulateHead::linearize(Scripts &scripts, bool positive, Logger &log) {
-    AbstractStatement::linearize(scripts, positive, log);
+void ConjunctionAccumulateHead::linearize(Context &context, bool positive, Logger &log) {
+    AbstractStatement::linearize(context, positive, log);
     if (isOutputRecursive()) { complete_.setHeadRecursive(); }
 }
 
@@ -1412,7 +1482,7 @@ void ConjunctionComplete::startLinearize(bool active){
     if (active) { inst_ = Instantiator(*this); }
 }
 
-void ConjunctionComplete::linearize(Scripts &, bool, Logger &){
+void ConjunctionComplete::linearize(Context &, bool, Logger &){
     auto binder  = gringo_make_unique<BindOnce>();
     for (HeadOccurrence &x : defBy_) { x.defines(*binder->getUpdater(), &inst_); }
     inst_.add(std::move(binder), Instantiator::DependVec{});
@@ -1440,7 +1510,7 @@ void ConjunctionComplete::reportOther(F f, Logger &log) {
     f(atom);
     if (!atom->blocked() && !atom->defined() && !atom->enqueued()) {
         atom->setEnqueued(true);
-        todo_.emplace_back(atom - dom().begin());
+        todo_.emplace_back(numeric_cast<TodoVec::value_type>(atom - dom().begin()));
     }
 }
 
@@ -1527,7 +1597,7 @@ void DisjointComplete::startLinearize(bool active) {
     def_.setActive(active);
     if (active) { inst_ = Instantiator(*this); }
 }
-void DisjointComplete::linearize(Scripts &, bool, Logger &) {
+void DisjointComplete::linearize(Context &, bool, Logger &) {
     auto binder  = gringo_make_unique<BindOnce>();
     for (HeadOccurrence &x : defBy_) { x.defines(*binder->getUpdater(), &inst_); }
     inst_.add(std::move(binder), Instantiator::DependVec{});
@@ -1554,7 +1624,7 @@ void DisjointComplete::report(Output::OutputBase &, Logger &) {
 
 void DisjointComplete::enqueue(DisjointDomain::Iterator atom) {
     if (!atom->enqueued() && !atom->defined()) {
-        todo_.emplace_back(atom - dom().begin());
+        todo_.emplace_back(numeric_cast<TodoVec::value_type>(atom - dom().begin()));
         atom->setEnqueued(true);
     }
 }
@@ -1620,8 +1690,8 @@ void DisjointAccumulate::collectImportant(Term::VarSet &vars) {
     for (auto &x : bound) { vars.emplace(x.first->name); }
 }
 
-void DisjointAccumulate::linearize(Scripts &scripts, bool positive, Logger &log) {
-    AbstractStatement::linearize(scripts, positive, log);
+void DisjointAccumulate::linearize(Context &context, bool positive, Logger &log) {
+    AbstractStatement::linearize(context, positive, log);
     if (isOutputRecursive()) { complete_.setOutputRecursive(); }
 }
 
@@ -1663,9 +1733,10 @@ void DisjointAccumulate::printHead(std::ostream &out) const {
 
 // {{{1 definition of DisjointLiteral
 
-DisjointLiteral::DisjointLiteral(DisjointComplete &complete, NAF naf)
+DisjointLiteral::DisjointLiteral(DisjointComplete &complete, NAF naf, bool auxiliary)
 : complete_(complete)
-, naf_(naf) {
+, naf_(naf)
+, auxiliary_(auxiliary) {
 }
 
 DisjointLiteral::~DisjointLiteral() noexcept = default;
@@ -1713,7 +1784,7 @@ void DisjointLiteral::collect(VarTermBoundVec &vars) const {
     complete_.domRepr()->collect(vars, naf_ == NAF::POS);
 }
 
-UIdx DisjointLiteral::index(Scripts &, BinderType type, Term::VarSet &bound) {
+UIdx DisjointLiteral::index(Context &, BinderType type, Term::VarSet &bound) {
     return make_binder(complete_.dom(), naf_, *complete_.domRepr(), offset_, type, isRecursive(), bound, 0);
 }
 
@@ -1768,7 +1839,7 @@ void TheoryComplete::startLinearize(bool active) {
     if (active) { inst_ = Instantiator(*this); }
 }
 
-void TheoryComplete::linearize(Scripts &, bool, Logger &) {
+void TheoryComplete::linearize(Context &, bool, Logger &) {
     auto binder  = gringo_make_unique<BindOnce>();
     for (HeadOccurrence &x : defBy_) { x.defines(*binder->getUpdater(), &inst_); }
     inst_.add(std::move(binder), Instantiator::DependVec{});
@@ -1782,7 +1853,7 @@ void TheoryComplete::enqueue(Queue &q) {
 
 void TheoryComplete::enqueue(TheoryDomain::Iterator atom) {
     if (!atom->enqueued() && !atom->defined()) {
-        todo_.emplace_back(atom - dom().begin());
+        todo_.emplace_back(numeric_cast<TodoVec::value_type>(atom - dom().begin()));
         atom->setEnqueued(true);
     }
 }
@@ -1860,8 +1931,8 @@ TheoryAccumulate::TheoryAccumulate(TheoryComplete &complete, Output::UTheoryTerm
 
 TheoryAccumulate::~TheoryAccumulate() noexcept = default;
 
-void TheoryAccumulate::linearize(Scripts &scripts, bool positive, Logger &log) {
-    AbstractStatement::linearize(scripts, positive, log);
+void TheoryAccumulate::linearize(Context &context, bool positive, Logger &log) {
+    AbstractStatement::linearize(context, positive, log);
     if (isOutputRecursive()) { complete_.setOutputRecursive(); }
 }
 
@@ -1971,7 +2042,7 @@ void TheoryLiteral::collect(VarTermBoundVec &vars) const {
     complete_.domRepr()->collect(vars, naf_ == NAF::POS);
 }
 
-UIdx TheoryLiteral::index(Scripts &, BinderType type, Term::VarSet &bound) {
+UIdx TheoryLiteral::index(Context &, BinderType type, Term::VarSet &bound) {
     return make_binder(complete_.dom(), naf_, *complete_.domRepr(), offset_, type, isRecursive(), bound, 0);
 }
 
@@ -2053,7 +2124,7 @@ void HeadAggregateRule::report(Output::OutputBase &out, Logger &log) {
     }
     // Note: init bounds and all that stuff should be done here
     assert(!undefined);
-    Id_t offset = ret.first - dom.begin();
+    Id_t offset = numeric_cast<Id_t>(ret.first - dom.begin());
     rule.addHead(Output::LiteralId{NAF::POS, Output::AtomType::HeadAggregate, offset, dom.domainOffset()});
     out.output(rule);
 }
@@ -2119,7 +2190,7 @@ void HeadAggregateAccumulate::report(Output::OutputBase &out, Logger &log) {
         auto &predDom = static_cast<PredicateDomain&>(predDef_.dom());
         auto predAtm = predDom.reserve(predVal);
         if (!predAtm->fact()) {
-            lit = Output::LiteralId(NAF::POS, Output::AtomType::Predicate, predAtm - predDom.begin(), predDom.domainOffset());
+            lit = Output::LiteralId(NAF::POS, Output::AtomType::Predicate, numeric_cast<Id_t>(predAtm - predDom.begin()), predDom.domainOffset());
         }
     }
     atm->accumulate(out.data, tuple_.empty() ? def_.domRepr()->loc() : tuple_.front()->loc(), vals, lit, tempLits, log);
@@ -2146,7 +2217,7 @@ HeadAggregateComplete::HeadAggregateComplete(DomainData &data, UTerm &&repr, Agg
 
 void HeadAggregateComplete::enqueue(HeadAggregateDomain::Iterator atm) {
     if (!atm->enqueued()) {
-        todo_.emplace_back(atm - dom().begin());
+        todo_.emplace_back(numeric_cast<TodoVec::value_type>(atm - dom().begin()));
         atm->setEnqueued(true);
     }
 }
@@ -2165,7 +2236,7 @@ void HeadAggregateComplete::startLinearize(bool active) {
     }
     if (active) { inst_ = Instantiator(*this); }
 }
-void HeadAggregateComplete::linearize(Scripts &, bool, Logger &) {
+void HeadAggregateComplete::linearize(Context &, bool, Logger &) {
     auto binder  = gringo_make_unique<BindOnce>();
     for (HeadOccurrence &x : defBy_) { x.defines(*binder->getUpdater(), &inst_); }
     inst_.add(std::move(binder), Instantiator::DependVec{});
@@ -2310,7 +2381,7 @@ void HeadAggregateLiteral::collect(VarTermBoundVec &vars) const {
     complete_.domRepr()->collect(vars, true);
 }
 
-UIdx HeadAggregateLiteral::index(Scripts &, BinderType type, Term::VarSet &bound) {
+UIdx HeadAggregateLiteral::index(Context &, BinderType type, Term::VarSet &bound) {
     return make_binder(complete_.dom(), NAF::POS, *complete_.domRepr(), offset_, type, isRecursive(), bound, 0);
 }
 
@@ -2354,7 +2425,7 @@ void DisjunctionRule::report(Output::OutputBase &out, Logger &log) {
     if (fact) { ret.first->setFact(true); }
     assert(!undefined);
     complete_.enqueue(ret.first);
-    Id_t offset = ret.first - dom.begin();
+    Id_t offset = numeric_cast<Id_t>(ret.first - dom.begin());
     rule.addHead(Output::LiteralId{NAF::POS, Output::AtomType::Disjunction, offset, dom.domainOffset()});
     out.output(rule);
 }
@@ -2408,7 +2479,7 @@ void DisjunctionLiteral::collect(VarTermBoundVec &vars) const {
     complete_.domRepr()->collect(vars, true);
 }
 
-UIdx DisjunctionLiteral::index(Scripts &, BinderType type, Term::VarSet &bound) {
+UIdx DisjunctionLiteral::index(Context &, BinderType type, Term::VarSet &bound) {
     return make_binder(complete_.dom(), NAF::POS, *complete_.domRepr(), offset_, type, isRecursive(), bound, 0);
 }
 
@@ -2443,7 +2514,7 @@ void DisjunctionComplete::startLinearize(bool active) {
     if (active) { inst_ = Instantiator(*this); }
 }
 
-void DisjunctionComplete::linearize(Scripts &, bool, Logger &) {
+void DisjunctionComplete::linearize(Context &, bool, Logger &) {
     auto binder  = gringo_make_unique<BindOnce>();
     for (HeadOccurrence &x : defBy_) { x.defines(*binder->getUpdater(), &inst_); }
     inst_.add(std::move(binder), Instantiator::DependVec{});
@@ -2475,7 +2546,7 @@ void DisjunctionComplete::propagate(Queue &queue) {
 void DisjunctionComplete::enqueue(DisjunctionDomain::Iterator atom) {
     if (!atom->enqueued()) {
         atom->setEnqueued(true);
-        todo_.emplace_back(atom - dom().begin());
+        todo_.emplace_back(numeric_cast<TodoVec::value_type>(atom - dom().begin()));
     }
 }
 
@@ -2571,8 +2642,8 @@ void DisjunctionAccumulate::analyze(Dep::Node &node, Dep &dep) {
     }
 }
 
-void DisjunctionAccumulate::linearize(Scripts &scripts, bool positive, Logger &log) {
-    AbstractStatement::linearize(scripts, positive, log);
+void DisjunctionAccumulate::linearize(Context &context, bool positive, Logger &log) {
+    AbstractStatement::linearize(context, positive, log);
     Term::VarSet important;
     if (predDef_) { predDef_.collectImportant(important); }
     Term::VarSet boundInitially;
@@ -2581,7 +2652,7 @@ void DisjunctionAccumulate::linearize(Scripts &scripts, bool positive, Logger &l
     //       by construction, there cannot be positive recursive literals in it
     elemRepr_->collect(boundInitially);
     complete_.domRepr()->collect(boundInitially);
-    InstVec insts = _linearize(log, scripts, positive, accuHead_, std::move(important), headCond_, boundInitially);
+    InstVec insts = _linearize(log, context, positive, accuHead_, std::move(important), headCond_, boundInitially);
     assert(insts.size() == 1);
     instHead_ = std::move(insts.front());
 }
@@ -2624,7 +2695,7 @@ void DisjunctionAccumulate::reportHead(Output::OutputBase &out, Logger &log) {
         auto &predDom = static_cast<PredicateDomain&>(predDef_.dom());
         auto predAtm = predDom.reserve(predRepr);
         if (predAtm->fact()) { return; }
-        tempLits.emplace_back(Output::LiteralId(NAF::POS, Output::AtomType::Predicate, predAtm - predDom.begin(), predDom.domainOffset()));
+        tempLits.emplace_back(Output::LiteralId(NAF::POS, Output::AtomType::Predicate, numeric_cast<Id_t>(predAtm - predDom.begin()), predDom.domainOffset()));
     }
     complete_.enqueue(atm);
     atm->accumulateHead(out.data, elemRepr, tempLits);

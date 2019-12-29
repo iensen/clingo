@@ -1,20 +1,24 @@
-// {{{ GPL License
+// {{{ MIT License
 
-// This file is part of gringo - a grounder for logic programs.
-// Copyright (C) 2013  Roland Kaminski
+// Copyright 2017 Roland Kaminski
 
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal in the Software without restriction, including without limitation the
+// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+// sell copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
 
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+// IN THE SOFTWARE.
 
 // }}}
 
@@ -40,7 +44,7 @@ class NonGroundParser : private LexerState<std::pair<String, std::pair<String, I
 private:
     enum Condition { yyccomment, yycblockcomment, yycpython, yyclua, yycnormal, yyctheory, yycdefinition };
 public:
-    NonGroundParser(INongroundProgramBuilder &pb);
+    NonGroundParser(INongroundProgramBuilder &pb, bool &incmode);
     void parseError(Location const &loc, std::string const &token);
     void pushFile(std::string &&filename, Logger &log);
     void pushStream(std::string &&name, std::unique_ptr<std::istream>, Logger &log);
@@ -65,20 +69,24 @@ public:
 
 private:
     int lex_impl(void *pValue, Location &loc);
-    void lexerError(StringSpan token);
+    void lexerError(Location const &loc, StringSpan token);
     bool push(std::string const &filename, bool include = false);
     bool push(std::string const &file, std::unique_ptr<std::istream> in);
     void pop();
-    void _init();
+    void init_();
     void condition(Condition cond);
     using LexerState<std::pair<String, std::pair<String, IdVec>>>::start;
     void start(Location &loc);
+    Location &end(Location &loc);
+    using LexerState<std::pair<String, std::pair<String, IdVec>>>::eof;
+    Location &eof(Location &loc);
     Condition condition() const;
     String filename() const;
 
 private:
     std::set<std::string> filenames_;
-    bool incmodeIncluded_ = false;
+    bool &incmode_;
+    bool cspIncluded_ = false;
     TheoryLexing theoryLexing_ = TheoryLexing::Disabled;
     String not_;
     INongroundProgramBuilder &pb_;
@@ -89,10 +97,10 @@ private:
         unsigned elems;
         BoundVecUid bounds;
     };
-    Indexed<Aggr> _aggregates;
-    int           _startSymbol;
+    Indexed<Aggr> aggregates_;
+    int           injectSymbol_;
     Condition     condition_ = yycnormal;
-    String        _filename;
+    String        filename_;
     Logger *log_ = nullptr;
 };
 

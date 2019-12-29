@@ -1,5 +1,6 @@
 #script (python)
 
+import sys
 from clingo import Function, Tuple
 
 class Observer:
@@ -71,7 +72,7 @@ class Observer:
 
     def _heuristic(self, atom, type, bias, priority, condition):
         condition = sorted(set([ self.__map(lit) for lit in condition ]))
-        self.__reified.append(Function("heuristic", [atom, str(type), bias, Tuple(condition)]))
+        self.__reified.append(Function("heuristic", [self.__map(atom), str(type), bias, Tuple(condition)]))
 
     def _acyc_edge(self, node_u, node_v, condition):
         condition = sorted(set([ self.__map(lit) for lit in condition ]))
@@ -120,9 +121,10 @@ def main(prg):
     prg.ground([("base", [])])
     prg.solve(assumptions=[(Function("b"), False)])
     ctx = obs.finalize()
-    print "Solving..."
-    print "Answer: 1"
-    print " ".join([str(x) for x in ctx.get()])
+    print ("Solving...")
+    print ("Answer: 1")
+    print (" ".join([str(x) for x in ctx.get()]))
+    sys.stdout.flush()
 
 #end.
 

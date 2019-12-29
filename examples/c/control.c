@@ -2,14 +2,8 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-bool on_rule(bool choice, clingo_atom_t const *head, size_t head_size, clingo_literal_t const *body, size_t body_size, void *data) {
 
-}
-//! Observe weight rules passed to the solver.
-
-
-bool on_model(clingo_model_t *model, void *data, bool *goon) {
-  (void)data;
+bool print_model(clingo_model_t const *model) {
   bool ret = true;
   clingo_symbol_t *atoms = NULL;
   size_t atoms_n;
@@ -56,7 +50,6 @@ bool on_model(clingo_model_t *model, void *data, bool *goon) {
   }
 
   printf("\n");
-  *goon = true;
   goto out;
 
 error:
@@ -67,6 +60,35 @@ out:
   if (str)   { free(str); }
 
   return ret;
+}
+
+bool solve(clingo_control_t *ctl, clingo_solve_result_bitset_t *result) {
+  bool ret = true;
+  clingo_solve_handle_t *handle;
+  clingo_model_t const *model;
+
+  // get a solve handle
+  if (!clingo_control_solve(ctl, clingo_solve_mode_yield, NULL, 0, NULL, NULL, &handle)) { goto error; }
+  // loop over all models
+  while (true) {
+    if (!clingo_solve_handle_resume(handle)) { goto error; }
+    if (!clingo_solve_handle_model(handle, &model)) { goto error; }
+    // print the model
+    if (model) { print_model(model); }
+    // stop if there are no more models
+    else       { break; }
+  }
+  // close the solve handle
+  if (!clingo_solve_handle_get(handle, result)) { goto error; }
+
+  goto out;
+
+error:
+  ret = false;
+
+out:
+  // free the solve handle
+  return clingo_solve_handle_close(handle) && ret;
 }
 
 int main(int argc, char const **argv) {
@@ -85,8 +107,8 @@ int main(int argc, char const **argv) {
   // ground the base part
   if (!clingo_control_ground(ctl, parts, 1, NULL, NULL)) { goto error; }
 
-  // solve using a model callback
-  if (!clingo_control_solve(ctl, on_model, NULL, NULL, 0, &solve_ret)) { goto error; }
+  // solve
+  if (!solve(ctl, &solve_ret)) { goto error; }
 
   goto out;
 

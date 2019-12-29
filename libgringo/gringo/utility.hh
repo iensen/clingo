@@ -1,20 +1,24 @@
-// {{{ GPL License
+// {{{ MIT License
 
-// This file is part of gringo - a grounder for logic programs.
-// Copyright (C) 2013  Roland Kaminski
+// Copyright 2017 Roland Kaminski
 
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal in the Software without restriction, including without limitation the
+// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+// sell copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
 
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+// IN THE SOFTWARE.
 
 // }}}
 
@@ -31,9 +35,36 @@
 #include <algorithm>
 #include <cassert>
 #include <iterator>
+#include <type_traits>
+#include <limits>
 #include <potassco/basic_types.h>
 
 namespace Gringo {
+namespace detail {
+    template <int X> using int_type = std::integral_constant<int, X>;
+    template <class T, class S>
+    inline void nc_check(S s, int_type<0>) { // same sign
+        (void)s;
+        assert((std::is_same<T, S>::value) || (s >= std::numeric_limits<T>::min() && s <= std::numeric_limits<T>::max()));
+    }
+    template <class T, class S>
+    inline void nc_check(S s, int_type<-1>) { // Signed -> Unsigned
+        (void)s;
+        assert(s >= 0 && static_cast<S>(static_cast<T>(s)) == s);
+    }
+    template <class T, class S>
+    inline void nc_check(S s, int_type<1>) { // Unsigned -> Signed
+        (void)s;
+        assert(!(s > static_cast<typename std::make_unsigned<T>::type>(std::numeric_limits<T>::max())));
+    }
+} // namespace detail
+
+template <class T, class S>
+inline T numeric_cast(S s) {
+    constexpr int sv = int(std::numeric_limits<T>::is_signed) - int(std::numeric_limits<S>::is_signed);
+    detail::nc_check<T>(s, detail::int_type<sv>());
+    return static_cast<T>(s);
+}
 
 using Potassco::StringSpan;
 
@@ -347,6 +378,22 @@ public:
 private:
     ArrayBuf buf_;
 };
+
+// {{{1 onExit
+
+template <class T>
+class ScopeExit {
+public:
+    ScopeExit(T &&exit) : exit_(std::forward<T>(exit)) { }
+    ~ScopeExit() { exit_(); }
+private:
+    T exit_;
+};
+
+template <typename T>
+ScopeExit<T> onExit(T &&exit) {
+    return ScopeExit<T>(std::forward<T>(exit));
+}
 
 // }}}1
 
@@ -675,8 +722,8 @@ T get_clone(T const &x) {
 
 template <class S, class T, class U>
 void print_comma(S &out, T const &x, const char *sep, U const &f) {
-	using std::begin;
-	using std::end;
+    using std::begin;
+    using std::end;
     auto it(begin(x)), ie(end(x));
     if (it != ie) {
         f(out, *it);
@@ -710,17 +757,17 @@ inline void cross_product(std::vector<std::vector<T>> &vec) {
     res.emplace_back();
     res.back().reserve(vec.size());
     for (auto &x : vec) {
-        auto it = res.begin();
+        std::size_t it = 0; // res.begin();
         for (auto lt = x.begin(), mt = x.end() - 1; lt != mt; ++lt) {
             auto jt = it;
-            it = res.end();
+            it = res.size();
             auto kt = jt;
-            for (; kt != it; ++kt) { res.emplace_back(get_clone(*kt)); }
-            for (kt = jt; kt != it - 1; ++kt) { kt->emplace_back(get_clone(*lt)); }
-            kt->emplace_back(std::move(*lt));
+            for (; kt != it; ++kt) { res.emplace_back(get_clone(res[kt])); }
+            for (kt = jt; kt != it - 1; ++kt) { res[kt].emplace_back(get_clone(*lt)); }
+            res[kt].emplace_back(std::move(*lt));
         }
-        for (auto kt = res.end() - 1; it != kt; ++it) { it->emplace_back(get_clone(x.back())); }
-        it->emplace_back(std::move(x.back()));
+        for (auto kt = res.size() - 1; it != kt; ++it) { res[it].emplace_back(get_clone(x.back())); }
+        res[it].emplace_back(std::move(x.back()));
     }
     vec = std::move(res);
 }

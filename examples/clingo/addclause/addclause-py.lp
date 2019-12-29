@@ -9,8 +9,8 @@ def main(prg):
 
     prg.configuration.solve.models = 0
     prg.ground([("base", [])])
-    prg.solve(on_model = on_model)
-    print "and again"
+    prg.solve(on_model=on_model)
+    print ("and again")
     prg.solve()
 
 #end.

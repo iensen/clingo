@@ -1,20 +1,24 @@
-// {{{ GPL License
+// {{{ MIT License
 
-// This file is part of gringo - a grounder for logic programs.
-// Copyright (C) 2013  Roland Kaminski
+// Copyright 2017 Roland Kaminski
 
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal in the Software without restriction, including without limitation the
+// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+// sell copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
 
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+// IN THE SOFTWARE.
 
 // }}}
 
@@ -73,13 +77,17 @@ void Program::add(UStm &&stm) {
     }
 }
 
+void Program::addInput(Sig sig) {
+    sigs_.push(sig);
+}
+
 void Program::add(TheoryDef &&def, Logger &log) {
     auto it = theoryDefs_.find(def.name());
     if (it == theoryDefs_.end()) {
         theoryDefs_.push(std::move(def));
     }
     else {
-        GRINGO_REPORT(log, clingo_error_runtime)
+        GRINGO_REPORT(log, Warnings::RuntimeError)
             << def.loc() << ": error: redefinition of theory:" << "\n"
             << "  " << def.name() << "\n"
             << it->loc() << ": note: theory first defined here\n";
@@ -102,6 +110,8 @@ void Program::rewrite(Defines &defs, Logger &log) {
         UTerm blockTerm(args.empty()
             ? (UTerm)make_locatable<ValTerm>(block.loc, Symbol::createId(block.name))
             : make_locatable<FunctionTerm>(block.loc, block.name, get_clone(args)));
+        VarTermBoundVec blockBound;
+        blockTerm->collect(blockBound, true);
         incDefs.init(log);
 
         for (auto &fact : block.addedEdb) { sigs_.push(fact.sig()); }
@@ -112,7 +122,7 @@ void Program::rewrite(Defines &defs, Logger &log) {
             defs.apply(fact, rv, rt, false);
             if (rt) {
                 Location loc{rt->loc()};
-                block.addedStms.emplace_back(make_locatable<Statement>(loc, gringo_make_unique<SimpleHeadLiteral>(make_locatable<PredicateLiteral>(loc, NAF::POS, std::move(rt))), UBodyAggrVec{}, StatementType::RULE));
+                block.addedStms.emplace_back(make_locatable<Statement>(loc, gringo_make_unique<SimpleHeadLiteral>(make_locatable<PredicateLiteral>(loc, NAF::POS, std::move(rt))), UBodyAggrVec{}));
                 return Symbol();
             }
             else if (rv.type() != SymbolType::Special) { return rv; }
@@ -132,7 +142,7 @@ void Program::rewrite(Defines &defs, Logger &log) {
             std::get<1>(*block.edb).emplace_back(x->isEDB());
             if (std::get<1>(*block.edb).back().type() == SymbolType::Special) {
                 x->add(make_locatable<PredicateLiteral>(block.loc, NAF::POS, get_clone(blockTerm), true));
-                x->rewrite2();
+                x->rewrite();
                 block.stms.emplace_back(std::move(x));
                 std::get<1>(*block.edb).pop_back();
             }
@@ -140,7 +150,7 @@ void Program::rewrite(Defines &defs, Logger &log) {
         };
         auto rewrite1 = [&](UStm &x) -> void {
             x->initTheory(theoryDefs_, log);
-            if (x->rewrite1(project_, log)) {
+            if (x->simplify(project_, log)) {
                 if (x->hasPool(false)) { for (auto &y : x->unpool(false)) { rewrite2(y); } }
                 else                   { rewrite2(x); }
             }
@@ -148,6 +158,7 @@ void Program::rewrite(Defines &defs, Logger &log) {
         for (auto &x : block.addedStms) {
             x->replace(defs);
             x->replace(incDefs);
+            x->assignLevels(blockBound);
             if (x->hasPool(true)) { for (auto &y : x->unpool(true)) { rewrite1(y); } }
             else                  { rewrite1(x); }
         }
@@ -163,7 +174,7 @@ void Program::rewrite(Defines &defs, Logger &log) {
             stms_.emplace_back(make_locatable<Statement>(
                 loc,
                 gringo_make_unique<SimpleHeadLiteral>(make_locatable<PredicateLiteral>(loc, NAF::POS, get_clone(x.projected))),
-                std::move(body), StatementType::RULE));
+                std::move(body)));
             x.done = true;
         }
     }
@@ -179,7 +190,7 @@ void Program::check(Logger &log) {
         for (auto &atomDef : def.atomDefs()) {
             auto seenSig = seenSigs.emplace(atomDef.sig(), atomDef.loc());
             if (!seenSig.second) {
-                GRINGO_REPORT(log, clingo_error_runtime)
+                GRINGO_REPORT(log, Warnings::RuntimeError)
                     << atomDef.loc() << ": error: multiple definitions for theory atom:" << "\n"
                     << "  " << atomDef.sig() << "\n"
                     << seenSig.first->second << ": note: first defined here\n";
@@ -201,7 +212,31 @@ void Program::print(std::ostream &out) const {
     for (auto &x : stms_) { out << *x << "\n"; }
 }
 
-Ground::Program Program::toGround(DomainData &domains, Logger &log) {
+// Defines atoms that have been seen in earlier steps
+class DummyStatement : public Ground::Statement, private Ground::HeadOccurrence {
+public:
+    DummyStatement(UGTermVec terms, bool normal) : terms_{std::move(terms)}, normal_{normal}  {}
+    bool isNormal() const override { return normal_; }
+    void analyze(Dep::Node &node, Dep &dep) override {
+        for (auto &term : terms_) {
+            dep.provides(node, *this, get_clone(term));
+        }
+    }
+    void startLinearize(bool) override { }
+    void linearize(Context &, bool, Logger &) override { }
+    void enqueue(Ground::Queue &) override { }
+    void print(std::ostream &out) const override {
+        print_comma(out, terms_, ";", [](std::ostream &out, UGTerm const &term) { out << *term; });
+        out << ".";
+    }
+private:
+    void defines(IndexUpdater &, Ground::Instantiator *) override { }
+private:
+    UGTermVec terms_;
+    bool normal_;
+};
+
+Ground::Program Program::toGround(std::set<Sig> const &sigs, DomainData &domains, Logger &log) {
     HashSet<uint64_t> neg;
     Ground::Program::ClassicalNegationVec negate;
     auto gn = [&neg, &negate, &domains](Sig x) {
@@ -210,18 +245,22 @@ Ground::Program Program::toGround(DomainData &domains, Logger &log) {
         }
     };
     Ground::UStmVec stms;
+    if (!pheads.empty()) { stms.emplace_back(gringo_make_unique<DummyStatement>(std::move(pheads), true)); }
+    if (!nheads.empty()) { stms.emplace_back(gringo_make_unique<DummyStatement>(std::move(nheads), false)); }
     stms.emplace_back(make_locatable<Ground::ExternalRule>(Location("#external", 1, 1, "#external", 1, 1)));
     ToGroundArg arg(auxNames_, domains);
     Ground::SEdbVec edb;
     for (auto &block : blocks_) {
-        for (auto &x : block.edb->second) {
-            auto sig = x.sig();
-            if (sig.sign()) { gn(sig); }
-        }
-        edb.emplace_back(block.edb);
-        for (auto &x : block.stms) {
-            x->getNeg(gn);
-            x->toGround(arg, stms);
+        if (sigs.find(Sig{block.name.c_str() + 5, numeric_cast<uint32_t>(block.params.size()), false}) != sigs.end()) {
+            for (auto &x : block.edb->second) {
+                auto sig = x.sig();
+                if (sig.sign()) { gn(sig); }
+            }
+            edb.emplace_back(block.edb);
+            for (auto &x : block.stms) {
+                x->getNeg(gn);
+                x->toGround(arg, stms);
+            }
         }
     }
     for (auto &x : stms_) {
@@ -234,7 +273,10 @@ Ground::Program Program::toGround(DomainData &domains, Logger &log) {
         auto &node(dep.add(std::move(x), normal));
         node.stm->analyze(node, dep);
     }
-    Ground::Program prg(std::move(edb), dep.analyze(), std::move(negate));
+    auto ret = dep.analyze();
+    Ground::Program prg(std::move(edb), std::move(std::get<0>(ret)), std::move(negate));
+    pheads = std::move(std::get<1>(ret));
+    nheads = std::move(std::get<2>(ret));
     for (auto &sig : sigs_) {
         domains.add(sig);
     }
@@ -244,7 +286,7 @@ Ground::Program Program::toGround(DomainData &domains, Logger &log) {
     }
     std::sort(undef.begin(), undef.end(), [](Ground::UndefVec::value_type const &a, Ground::UndefVec::value_type const &b) { return a.first < b.first; });
     for (auto &x : undef) {
-        GRINGO_REPORT(log, clingo_warning_atom_undefined)
+        GRINGO_REPORT(log, Warnings::AtomUndefined)
             << x.first << ": info: atom does not occur in any rule head:\n"
             << "  " << *x.second << "\n";
     }
@@ -257,6 +299,8 @@ std::ostream &operator<<(std::ostream &out, Program const &p) {
     p.print(out);
     return out;
 }
+
+// }}}
 
 // }}}
 

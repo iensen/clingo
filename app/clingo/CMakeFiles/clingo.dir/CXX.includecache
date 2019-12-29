@@ -1,0 +1,34 @@
+#IncludeRegexLine: ^[ 	]*[#%][ 	]*(include|import)[ 	]*[<"]([^">]+)([">])
+
+#IncludeRegexScan: ^.*$
+
+#IncludeRegexComplain: ^$
+
+#IncludeRegexTransform: 
+
+/home/iensen/projects/clingo/app/clingo/main.cc
+pyclingo.h
+-
+luaclingo.h
+-
+clingo.h
+-
+iostream
+-
+
+libclingo/clingo.h
+stddef.h
+-
+stdint.h
+-
+stdbool.h
+-
+
+libclingo/clingo/script.h
+clingo.h
+-
+
+libpyclingo/pyclingo.h
+clingo/script.h
+-
+

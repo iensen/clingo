@@ -2,8 +2,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-bool on_model(clingo_model_t *model, void *data, bool *goon) {
-  (void)data;
+bool print_model(clingo_model_t const *model) {
   bool ret = true;
   clingo_symbol_t *atoms = NULL;
   size_t atoms_n;
@@ -50,7 +49,6 @@ bool on_model(clingo_model_t *model, void *data, bool *goon) {
   }
 
   printf("\n");
-  *goon = true;
   goto out;
 
 error:
@@ -63,6 +61,73 @@ out:
   return ret;
 }
 
+bool event_handler(clingo_solve_event_type_t type, void *event, void *data, bool *goon) {
+  (void)data;
+  (void)goon;
+  switch (type) {
+    case clingo_solve_event_type_statistics: {
+      clingo_statistics_t *stats;
+      uint64_t root, values, summary, value;
+      uint16_t n = 10, random = 1;
+      double sum = 0;
+
+      // obtain a pointer to the accumulated statistics
+      stats = ((clingo_statistics_t **)event)[1];
+
+      // get the root key which refering to a special modifiable entry
+      if (!clingo_statistics_root(stats, &root)) { return false; }
+
+      // set some pseudo-random values in an array
+      if (!clingo_statistics_map_add_subkey(stats, root, "values", clingo_statistics_type_array, &values)) { return false; }
+      for (uint16_t i = 0; i < n; ++i) {
+        random = (random << 3) ^ (random ^ ((random & 0xf800) >> 13)) ^ i;
+        if (!clingo_statistics_array_push(stats, values, clingo_statistics_type_value, &value)) { return false; }
+        if (!clingo_statistics_value_set(stats, value, random)) { return false; }
+        sum += random;
+      }
+
+      // add the sum and average of the values in a map under key summary
+      if (!clingo_statistics_map_add_subkey(stats, root, "summary", clingo_statistics_type_map, &summary)) { return false; }
+      if (!clingo_statistics_map_add_subkey(stats, summary, "sum", clingo_statistics_type_value, &value)) { return false; }
+      if (!clingo_statistics_value_set(stats, value, sum)) { return false; }
+      if (!clingo_statistics_map_add_subkey(stats, summary, "avg", clingo_statistics_type_value, &value)) { return false; }
+      if (!clingo_statistics_value_set(stats, value, (double)sum/n)) { return false; }
+      break;
+    }
+  }
+
+  return true;
+}
+
+bool solve(clingo_control_t *ctl, clingo_solve_result_bitset_t *result) {
+  bool ret = true;
+  clingo_solve_handle_t *handle;
+  clingo_model_t const *model;
+
+  // get a solve handle
+  if (!clingo_control_solve(ctl, clingo_solve_mode_yield, NULL, 0, event_handler, NULL, &handle)) { goto error; }
+  // loop over all models
+  while (true) {
+    if (!clingo_solve_handle_resume(handle)) { goto error; }
+    if (!clingo_solve_handle_model(handle, &model)) { goto error; }
+    // print the model
+    if (model) { print_model(model); }
+    // stop if there are no more models
+    else       { break; }
+  }
+  // get the solve results
+  if (!clingo_solve_handle_get(handle, result)) { goto error; }
+
+  goto out;
+
+error:
+  ret = false;
+
+out:
+  // free the solve handle
+  return clingo_solve_handle_close(handle) && ret;
+}
+
 void print_prefix(int depth) {
   for (int i = 0; i < depth; ++i) {
     printf("  ");
@@ -70,7 +135,7 @@ void print_prefix(int depth) {
 }
 
 // recursively print the statistics object
-bool print_statistics(clingo_statistics_t *stats, uint64_t key, int depth) {
+bool print_statistics(const clingo_statistics_t *stats, uint64_t key, int depth) {
   bool ret = true;
   clingo_statistics_type_t type;
 
@@ -149,11 +214,11 @@ int main(int argc, char const **argv) {
   clingo_part_t parts[] = {{ "base", NULL, 0 }};
   clingo_configuration_t *conf;
   clingo_id_t conf_root, conf_sub;
-  clingo_statistics_t *stats;
+  const clingo_statistics_t *stats;
   uint64_t stats_key;
 
   // create a control object and pass command line arguments
-  if (!clingo_control_new(argv+1, argc-1, NULL, NULL, 20, &ctl) != 0) { goto error; }
+  if (!clingo_control_new(argv+1, argc-1, NULL, NULL, 20, &ctl)) { goto error; }
 
   // get the configuration object and its root key
   if (!clingo_control_configuration(ctl, &conf)) { goto error; }
@@ -168,8 +233,8 @@ int main(int argc, char const **argv) {
   // ground the base part
   if (!clingo_control_ground(ctl, parts, 1, NULL, NULL)) { goto error; }
 
-  // solve using a model callback
-  if (!clingo_control_solve(ctl, on_model, NULL, NULL, 0, &solve_ret)) { goto error; }
+  // solve
+  if (!solve(ctl, &solve_ret)) { goto error; }
 
   // get the statistics object, get the root key, then print the statistics recursively
   if (!clingo_control_statistics(ctl, &stats)) { goto error; }

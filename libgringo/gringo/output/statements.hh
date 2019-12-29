@@ -1,20 +1,24 @@
-// {{{ GPL License
+// {{{ MIT License
 
-// This file is part of gringo - a grounder for logic programs.
-// Copyright (C) 2013  Roland Kaminski
+// Copyright 2017 Roland Kaminski
 
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal in the Software without restriction, including without limitation the
+// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+// sell copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
 
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+// IN THE SOFTWARE.
 
 // }}}
 
@@ -239,49 +243,13 @@ struct LinearConstraint {
         using Coef = CoefVarVec::value_type;
         State(Bound &bound, Coef &coef)
             : bound(bound)
-            , coef(coef.first) { reset(); }
+            , coef(coef.first) { }
         int upper()  { return bound.getUpper(coef); }
         int lower()  { return bound.getLower(coef); }
-        bool valid() { return atom != (coef < 0 ? bound.atoms.begin() : bound.atoms.end()); }
-        void next(int total, int &ret) {
-            if (coef < 0) {
-                --atom;
-                --current;
-                auto it = current;
-                --it;
-                ret = total + coef * (*it);
-            }
-            else {
-                ++atom;
-                ++current;
-                ret = total + coef * (*current);
-            }
-        }
-        void reset() {
-            current = coef < 0 ? bound.end() : bound.begin();
-            atom    = coef < 0 ? bound.atoms.end() : bound.atoms.begin();
-        }
-        Bound                   &bound;
-        Bound::ConstIterator     current;
-        Bound::AtomVec::iterator atom;
-        int                      coef;
+        Bound &bound;
+        int    coef;
     };
     using StateVec = std::vector<State>;
-    struct Generate {
-        using AuxVec = std::vector<Potassco::Atom_t>;
-        Generate(LinearConstraint &cons, DomainData &data, Translator &trans)
-            : cons(cons)
-            , data(data)
-            , trans(trans) { }
-        bool init();
-        int getBound() { return cons.bound; }
-        void generate(StateVec::iterator it, int current, int remainder);
-        StateVec          states;
-        LinearConstraint &cons;
-        DomainData       &data;
-        Translator       &trans;
-        AuxVec            aux;
-    };
     LinearConstraint(Potassco::Atom_t atom, CoefVarVec &&coefs, int bound)
         : atom(atom)
         , coefs(std::move(coefs))
@@ -293,6 +261,15 @@ struct LinearConstraint {
 };
 
 // }}}2
+
+enum class ShowType : unsigned {
+    Csp        = 1,
+    Shown      = 2,
+    Atoms      = 4,
+    Terms      = 8,
+    All        = 15,
+    Complement = 16
+};
 
 class Translator {
 private:

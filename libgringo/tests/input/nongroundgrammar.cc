@@ -1,20 +1,24 @@
-// {{{ GPL License
+// {{{ MIT License
 
-// This file is part of gringo - a grounder for logic programs.
-// Copyright (C) 2013  Roland Kaminski
+// Copyright 2017 Roland Kaminski
 
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal in the Software without restriction, including without limitation the
+// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+// sell copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
 
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+// IN THE SOFTWARE.
 
 // }}}
 
@@ -119,11 +123,12 @@ public:
     virtual void define(Location const &loc, String name, TermUid value, bool defaultDef, Logger &log) override;
     virtual void optimize(Location const &loc, TermUid weight, TermUid priority, TermVecUid cond, BdLitVecUid body) override;
     virtual void showsig(Location const &loc, Sig sig, bool csp) override;
+    virtual void defined(Location const &loc, Sig sig) override;
     virtual void show(Location const &loc, TermUid t, BdLitVecUid body, bool csp) override;
     virtual void python(Location const &loc, String code) override;
     virtual void lua(Location const &loc, String code) override;
     virtual void block(Location const &loc, String name, IdVecUid args) override;
-    virtual void external(Location const &loc, TermUid head, BdLitVecUid body) override;
+    virtual void external(Location const &loc, TermUid head, BdLitVecUid body, TermUid type) override;
     virtual void edge(Location const &loc, TermVecVecUid edges, BdLitVecUid body) override;
     virtual void heuristic(Location const &loc, TermUid termUid, BdLitVecUid body, TermUid a, TermUid b, TermUid mod) override;
     virtual void project(Location const &loc, TermUid termUid, BdLitVecUid body) override;
@@ -593,8 +598,9 @@ void TestNongroundProgramBuilder::rule(Location const &, HdLitUid head, BdLitVec
     statements_.emplace_back(str());
 }
 
-void TestNongroundProgramBuilder::define(Location const &, String name, TermUid value, bool, Logger &) {
+void TestNongroundProgramBuilder::define(Location const &, String name, TermUid value, bool def, Logger &) {
     current_ << "#const " << name << "=" << terms_.erase(value) << ".";
+    if (!def) { current_ << " [override]"; }
     statements_.emplace_back(str());
 }
 
@@ -614,6 +620,11 @@ void TestNongroundProgramBuilder::optimize(Location const &, TermUid weight, Ter
 
 void TestNongroundProgramBuilder::showsig(Location const &, Sig sig, bool csp) {
     current_ << "#showsig " << (csp ? "$" : "") << sig << ".";
+    statements_.emplace_back(str());
+}
+
+void TestNongroundProgramBuilder::defined(Location const &, Sig sig) {
+    current_ << "#defined " << sig << ".";
     statements_.emplace_back(str());
 }
 
@@ -644,14 +655,14 @@ void TestNongroundProgramBuilder::block(Location const &, String name, IdVecUid 
     statements_.emplace_back(str());
 }
 
-void TestNongroundProgramBuilder::external(Location const &, TermUid head, BdLitVecUid bodyuid) {
+void TestNongroundProgramBuilder::external(Location const &, TermUid head, BdLitVecUid bodyuid, TermUid type) {
     current_ << "#external " << terms_.erase(head);
     StringVec body(bodies_.erase(bodyuid));
     if (!body.empty()) {
         current_ << ":";
         print(body, ";");
     }
-    current_ << ".";
+    current_ << ". [" << terms_.erase(type) << "]";
     statements_.emplace_back(str());
 }
 
@@ -932,7 +943,8 @@ TestNongroundProgramBuilder::~TestNongroundProgramBuilder() { }
 std::string parse(std::string const &str) {
     Gringo::Test::TestGringoModule log;
     TestNongroundProgramBuilder pb;
-    NonGroundParser ngp(pb);
+    bool incmode;
+    NonGroundParser ngp(pb, incmode);
     ngp.pushStream("-", std::unique_ptr<std::istream>(new std::stringstream(str)), log);
     ngp.parse(log);
     return pb.toString();
@@ -956,6 +968,7 @@ TEST_CASE("input-nongroundprogrambuilder", "[input]") {
         REQUIRE("#program base().\np(|1;2;3|)." == parse("p(|1;2;3|)."));
         // lua function calls
         REQUIRE("#program base().\np(@f())." == parse("p(@f())."));
+        REQUIRE("#program base().\np(@f())." == parse("p(@f)."));
         REQUIRE("#program base().\np(@f(1))." == parse("p(@f(1))."));
         REQUIRE("#program base().\np(@f(1,2))." == parse("p(@f(1,2))."));
         REQUIRE("#program base().\np(@f(1,2,3))." == parse("p(@f(1,2,3))."));
@@ -1131,23 +1144,30 @@ TEST_CASE("input-nongroundprogrambuilder", "[input]") {
         REQUIRE("#program base().\na:b." == parse("a:b."));
         REQUIRE("#program base().\na:b,c." == parse("a:b,c."));
         // literal COMMA disjunctionsep literal optcondition
-        REQUIRE("#program base().\nb:;c:;a:." == parse("a,b,c."));
-        REQUIRE("#program base().\nb:;c:;d:;a:." == parse("a,b;c;d."));
-        REQUIRE("#program base().\nb:;c:d,e;a:." == parse("a,b,c:d,e."));
-        REQUIRE("#program base().\nb:d,e;c:;a:." == parse("a,b:d,e;c."));
+        REQUIRE("#program base().\na:;b:;c:." == parse("a,b,c."));
+        REQUIRE("#program base().\na:;b:;c:;d:." == parse("a,b;c;d."));
+        REQUIRE("#program base().\na:;b:;c:d,e." == parse("a,b,c:d,e."));
+        REQUIRE("#program base().\na:;b:d,e;c:." == parse("a,b:d,e;c."));
         // literal SEM disjunctionsep literal optcondition
-        REQUIRE("#program base().\nb:;c:;a:." == parse("a;b,c."));
-        REQUIRE("#program base().\nb:;c:;d:;a:." == parse("a;b;c;d."));
-        REQUIRE("#program base().\nb:;c:d,e;a:." == parse("a;b,c:d,e."));
-        REQUIRE("#program base().\nb:d,e;c:;a:." == parse("a;b:d,e;c."));
+        REQUIRE("#program base().\na:;b:;c:." == parse("a;b,c."));
+        REQUIRE("#program base().\na:;b:;c:;d:." == parse("a;b;c;d."));
+        REQUIRE("#program base().\na:;b:;c:d,e." == parse("a;b,c:d,e."));
+        REQUIRE("#program base().\na:;b:d,e;c:." == parse("a;b:d,e;c."));
         // literal COLON litvec SEM disjunctionsep literal optcondition
-        REQUIRE("#program base().\nc:;a:." == parse("a;c."));
-        REQUIRE("#program base().\nc:;a:x." == parse("a:x;c."));
-        REQUIRE("#program base().\nc:;a:x,y." == parse("a:x,y;c."));
-        REQUIRE("#program base().\nb:;c:;a:x,y." == parse("a:x,y;b,c."));
-        REQUIRE("#program base().\nb:;c:;d:;a:x,y." == parse("a:x,y;b;c;d."));
-        REQUIRE("#program base().\nb:;c:d,e;a:x,y." == parse("a:x,y;b,c:d,e."));
-        REQUIRE("#program base().\nb:d,e;c:;a:x,y." == parse("a:x,y;b:d,e;c."));
+        REQUIRE("#program base().\na:;c:." == parse("a;c."));
+        REQUIRE("#program base().\na:x;c:." == parse("a:x;c."));
+        REQUIRE("#program base().\na:x,y;c:." == parse("a:x,y;c."));
+        REQUIRE("#program base().\na:x,y;b:;c:." == parse("a:x,y;b,c."));
+        REQUIRE("#program base().\na:x,y;b:;c:;d:." == parse("a:x,y;b;c;d."));
+        REQUIRE("#program base().\na:x,y;b:;c:d,e." == parse("a:x,y;b,c:d,e."));
+        REQUIRE("#program base().\na:x,y;b:d,e;c:." == parse("a:x,y;b:d,e;c."));
+        // empty condition
+        REQUIRE("#program base().\na:;b:;c:." == parse("a:;b:;c:."));
+    }
+
+    SECTION("external") {
+        REQUIRE("#program base().\n#external p(X):q(X). [false]" == parse("#external p(X) : q(X)."));
+        REQUIRE("#program base().\n#external p(X):q(X). [X]" == parse("#external p(X) : q(X). [X]"));
     }
 
     SECTION("rule") {
@@ -1172,7 +1192,7 @@ TEST_CASE("input-nongroundprogrambuilder", "[input]") {
         REQUIRE("#program base().\n#count{}." == parse("{}."));
         REQUIRE("#program base().\nnott<=#count{}." == parse("nott{}."));
         // disjunction
-        REQUIRE("#program base().\nb:;a:." == parse("a,b."));
+        REQUIRE("#program base().\na:;b:." == parse("a,b."));
         // rules
         REQUIRE("#program base().\na." == parse("a."));
         REQUIRE("#program base().\na:-b." == parse("a:-b."));
@@ -1184,6 +1204,47 @@ TEST_CASE("input-nongroundprogrambuilder", "[input]") {
 
     SECTION("define") {
         REQUIRE("#program base().\n#const a=10." == parse("#const a=10."));
+        REQUIRE("#program base().\n#const a=x." == parse("#const a=x."));
+        REQUIRE("#program base().\n#const a=1." == parse("#const a=1."));
+        REQUIRE("#program base().\n#const a=\"1\"." == parse("#const a=\"1\"."));
+        REQUIRE("#program base().\n#const a=#inf." == parse("#const a=#inf."));
+        REQUIRE("#program base().\n#const a=#sup." == parse("#const a=#sup."));
+        // absolute
+        REQUIRE("#program base().\n#const a=|1|." == parse("#const a=|1|."));
+        // lua function calls
+        REQUIRE("#program base().\n#const a=@f()." == parse("#const a=@f()."));
+        REQUIRE("#program base().\n#const a=@f()." == parse("#const a=@f."));
+        REQUIRE("#program base().\n#const a=@f(1)." == parse("#const a=@f(1)."));
+        REQUIRE("#program base().\n#const a=@f(1,2)." == parse("#const a=@f(1,2)."));
+        REQUIRE("#program base().\n#const a=@f(1,2,3)." == parse("#const a=@f(1,2,3)."));
+        // function symbols
+        REQUIRE("#program base().\n#const a=f." == parse("#const a=f()."));
+        REQUIRE("#program base().\n#const a=f(1)." == parse("#const a=f(1)."));
+        REQUIRE("#program base().\n#const a=f(1,2)." == parse("#const a=f(1,2)."));
+        REQUIRE("#program base().\n#const a=f(1,2,3)." == parse("#const a=f(1,2,3)."));
+        // tuples / parenthesis
+        REQUIRE("#program base().\n#const a=()." == parse("#const a=()."));
+        REQUIRE("#program base().\n#const a=(1)." == parse("#const a=(1)."));
+        REQUIRE("#program base().\n#const a=(1,2)." == parse("#const a=(1,2)."));
+        REQUIRE("#program base().\n#const a=(1,2,3)." == parse("#const a=(1,2,3)."));
+        // unary operations
+        REQUIRE("#program base().\n#const a=-1." == parse("#const a=-1."));
+        REQUIRE("#program base().\n#const a=~1." == parse("#const a=~1."));
+        // binary operations
+        REQUIRE("#program base().\n#const a=(1**2)." == parse("#const a=1**2."));
+        REQUIRE("#program base().\n#const a=(1\\2)." == parse("#const a=1\\2."));
+        REQUIRE("#program base().\n#const a=(1/2)." == parse("#const a=1/2."));
+        REQUIRE("#program base().\n#const a=(1*2)." == parse("#const a=1*2."));
+        REQUIRE("#program base().\n#const a=(1-2)." == parse("#const a=1-2."));
+        REQUIRE("#program base().\n#const a=(1+2)." == parse("#const a=1+2."));
+        REQUIRE("#program base().\n#const a=(1&2)." == parse("#const a=1&2."));
+        REQUIRE("#program base().\n#const a=(1?2)." == parse("#const a=1?2."));
+        REQUIRE("#program base().\n#const a=(1^2)." == parse("#const a=1^2."));
+        // precedence
+        REQUIRE("#program base().\n#const a=((1+2)+((3*4)*(5**(6**7))))." == parse("#const a=1+2+3*4*5**6**7."));
+        // attributes
+        REQUIRE("#program base().\n#const a=10." == parse("#const a=10. [default]"));
+        REQUIRE("#program base().\n#const a=10. [override]" == parse("#const a=10. [override]"));
     }
 
     SECTION("optimize") {
@@ -1203,11 +1264,16 @@ TEST_CASE("input-nongroundprogrambuilder", "[input]") {
         REQUIRE("#program base().\n#show X:p(X);1<=#count{q(X):p(X)}." == parse("#show X:p(X), 1 { q(X):p(X) }."));
     }
 
+    SECTION("input") {
+        REQUIRE("#program base().\n#defined p/1." == parse("#defined p/1."));
+    }
+
     SECTION("include") {
-#ifndef _MSC_VER
-        std::ofstream("/tmp/test_include.lp") << "b.\n";
-        REQUIRE("#program base().\na.\nb.\n#program base().\nc.\nd." == parse("a.\n#include \"/tmp/test_include.lp\".\nc.\nd.\n"));
-#endif
+        struct Del {
+            Del()  { std::ofstream("test_include.lp") << "b.\n"; }
+            ~Del() { std::remove("test_include.lp"); }
+        } del;
+        REQUIRE("#program base().\na.\nb.\n#program base().\nc.\nd." == parse("a.\n#include \"test_include.lp\".\nc.\nd.\n"));
     }
 
     SECTION("csp") {
@@ -1244,7 +1310,9 @@ TEST_CASE("input-nongroundprogrambuilder", "[input]") {
     SECTION("theory") {
         // NOTE: things would be less error prone if : and ; would not be valid theory connectives
         REQUIRE("#program base().\n&x{}." == parse("&x { }."));
+        REQUIRE("#program base().\n&x{}." == parse("&x."));
         REQUIRE("#program base().\n#false:-&x{}." == parse(":-&x { }."));
+        REQUIRE("#program base().\n#false:-&x{}." == parse(":-&x."));
         REQUIRE("#program base().\n&x{} < 42." == parse("&x { } < 42."));
         REQUIRE("#program base().\n#false:-&x{} < 42." == parse(":-&x { } < 42."));
         REQUIRE("#program base().\n#false:-&x{} < 42 + 17 ^ (- 1)." == parse(":-&x { } < 42+17^(-1)."));

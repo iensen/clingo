@@ -31,18 +31,18 @@
 // version 2.2 of Bison.
 
 /**
- ** \file build/release/libgringo/src/input/nongroundgrammar/stack.hh
+ ** \file /home/iensen/projects/clingo/libgringo/src/input/nongroundgrammar/stack.hh
  ** Define the Gringo::Input::NonGroundGrammar::stack class.
  */
 
-#ifndef YY_GRINGONONGROUNDGRAMMAR_BUILD_RELEASE_LIBGRINGO_SRC_INPUT_NONGROUNDGRAMMAR_STACK_HH_INCLUDED
-# define YY_GRINGONONGROUNDGRAMMAR_BUILD_RELEASE_LIBGRINGO_SRC_INPUT_NONGROUNDGRAMMAR_STACK_HH_INCLUDED
+#ifndef YY_GRINGONONGROUNDGRAMMAR_HOME_IENSEN_PROJECTS_CLINGO_LIBGRINGO_SRC_INPUT_NONGROUNDGRAMMAR_STACK_HH_INCLUDED
+# define YY_GRINGONONGROUNDGRAMMAR_HOME_IENSEN_PROJECTS_CLINGO_LIBGRINGO_SRC_INPUT_NONGROUNDGRAMMAR_STACK_HH_INCLUDED
 
 # include <vector>
 
-#line 24 "libgringo/src/input/nongroundgrammar.yy" // stack.hh:132
+#line 28 "/home/iensen/projects/clingo/libgringo/src/input/nongroundgrammar.yy" // stack.hh:132
 namespace Gringo { namespace Input { namespace NonGroundGrammar {
-#line 46 "build/release/libgringo/src/input/nongroundgrammar/stack.hh" // stack.hh:132
+#line 46 "/home/iensen/projects/clingo/libgringo/src/input/nongroundgrammar/stack.hh" // stack.hh:132
   template <class T, class S = std::vector<T> >
   class stack
   {
@@ -150,8 +150,8 @@ namespace Gringo { namespace Input { namespace NonGroundGrammar {
     unsigned int range_;
   };
 
-#line 24 "libgringo/src/input/nongroundgrammar.yy" // stack.hh:132
+#line 28 "/home/iensen/projects/clingo/libgringo/src/input/nongroundgrammar.yy" // stack.hh:132
 } } } // Gringo::Input::NonGroundGrammar
-#line 156 "build/release/libgringo/src/input/nongroundgrammar/stack.hh" // stack.hh:132
+#line 156 "/home/iensen/projects/clingo/libgringo/src/input/nongroundgrammar/stack.hh" // stack.hh:132
 
-#endif // !YY_GRINGONONGROUNDGRAMMAR_BUILD_RELEASE_LIBGRINGO_SRC_INPUT_NONGROUNDGRAMMAR_STACK_HH_INCLUDED
+#endif // !YY_GRINGONONGROUNDGRAMMAR_HOME_IENSEN_PROJECTS_CLINGO_LIBGRINGO_SRC_INPUT_NONGROUNDGRAMMAR_STACK_HH_INCLUDED

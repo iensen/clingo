@@ -1,5 +1,6 @@
 #!/usr/bin/python
 
+import re
 import os
 import os.path
 import sys
@@ -35,16 +36,12 @@ clingo = parse_ret.clingo
 
 def find_clingo():
     clingos = [
-        "build/debug/clingo",
-        "build/release/clingo",
-        "x64/ReleaseScript/clingo.exe",
-        "ReleaseScript/clingo.exe",
-        "x64/Release/clingo.exe",
-        "Release/clingo.exe",
-        "x64/DebugScript/clingo.exe",
-        "DebugScript/clingo.exe",
-        "x64/Debug/clingo.exe",
-        "Debug/clingo.exe",
+        "build/debug/bin/clingo",
+        "build/release/bin/clingo",
+        "build/bin/clingo",
+        "build/cmake/bin/clingo",
+        "build/bin/Debug/clingo.exe",
+        "build/bin/Release/clingo.exe",
         ]
     for x in clingos:
         x = os.path.normpath("{}/../../../{}".format(wd, x))
@@ -79,7 +76,7 @@ def normalize(out):
     step=0
     result="ERROR"
     norm=[]
-    for line in out.split('\n'):
+    for line in out.split("\n"):
         if state == 1:
             if step > 0:
                 norm.append("Step: {}".format(step))
@@ -118,8 +115,9 @@ if parse_ret.action == "normalize":
     args = [clingo, "0", parse_ret.file, "-Wnone"]
     b = os.path.splitext(parse_ret.file)[0]
     if os.path.exists(b + ".cmd"):
-        for x in open(b + ".cmd"):
-            args.extend(x.strip().split())
+        with open(b + ".cmd", 'rU') as cmd_file:
+            for x in cmd_file:
+                args.extend(x.strip().split())
     args.extend(extra_argv)
     out, err = sp.Popen(args, stderr=sp.PIPE, stdout=sp.PIPE, universal_newlines=True).communicate()
     sys.stdout.write(normalize(out))
@@ -128,20 +126,35 @@ if parse_ret.action == "run":
     total  = 0
     failed = 0
 
+    out, err = sp.Popen([clingo, "--version"], stderr=sp.PIPE, stdout=sp.PIPE, universal_newlines=True).communicate()
+    with_python  = out.find("with Python") > 0
+    with_lua     = out.find("with Lua") > 0
+    with_threads = out.find("WITH_THREADS=1") > 0
     for root, dirs, files in os.walk(wd):
         for f in sorted(files):
             if f.endswith(".lp"):
-                total+= 1
                 b = os.path.join(root, f[:-3])
+                with open(b + ".lp", 'rU') as inst_file:
+                    inst = inst_file.read()
+                    if (not with_python and re.search(r"#script[ ]*\(python\)", inst)) or \
+                       (not with_lua and re.search(r"#script[ ]*\(lua\)", inst)) or \
+                       (not with_threads and re.search("async_=", inst)) or \
+                       (not with_threads and re.search("solve_async", inst)):
+                        continue
+
+                total+= 1
                 sys.stdout.flush()
+
                 args = [clingo, "0", b + ".lp", "-Wnone"]
                 if os.path.exists(b + ".cmd"):
-                    for x in open(b + ".cmd"):
-                        args.extend(x.strip().split())
+                    with open(b + ".cmd", 'rU') as cmd_file:
+                        for x in cmd_file:
+                            args.extend(x.strip().split())
                 args.extend(extra_argv)
                 out, err = sp.Popen(args, stderr=sp.PIPE, stdout=sp.PIPE, universal_newlines=True).communicate()
                 norm = normalize(out)
-                sol  = reorder(open(b + ".sol").read())
+                with open(b + ".sol", 'rU') as sol_file:
+                    sol  = reorder(sol_file.read())
                 if norm != sol:
                     failed+= 1
                     print
@@ -154,6 +167,18 @@ if parse_ret.action == "run":
                     for line in list(d.compare(sol.splitlines(), norm.splitlines())):
                         if not line.startswith(" "):
                             print (line)
+                    print
+                    print ("." * 79)
+                    print
+                    print ("STDOUT:")
+                    print
+                    print (out)
+                    print
+                    print ("." * 79)
+                    print
+                    print ("STDERR:")
+                    print
+                    print (err)
                     print
                 sys.stdout.flush()
 

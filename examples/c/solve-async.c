@@ -1,10 +1,12 @@
+#ifndef WIN32
+
 #include <clingo.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdatomic.h>
+#include <assert.h>
 
-bool on_model(clingo_model_t *model, void *data, bool *goon) {
-  (void)data;
+bool print_model(clingo_model_t *model) {
   bool ret = true;
   clingo_symbol_t *atoms = NULL;
   size_t atoms_n;
@@ -51,7 +53,6 @@ bool on_model(clingo_model_t *model, void *data, bool *goon) {
   }
 
   printf("\n");
-  *goon = true;
   goto out;
 
 error:
@@ -64,9 +65,14 @@ out:
   return ret;
 }
 
-bool on_finish(clingo_solve_result_bitset_t result, atomic_flag *running) {
-  (void)result;
-  atomic_flag_clear(running);
+bool on_event(clingo_solve_event_type_t type, void *event, void *data, bool *goon) {
+  (void)type;
+  (void)event;
+  (void)goon; // this is true by default
+  if (type == clingo_solve_event_type_finish) {
+      atomic_flag *running = (atomic_flag*)data;
+      atomic_flag_clear(running);
+  }
   return true;
 }
 
@@ -79,7 +85,7 @@ int main(int argc, char const **argv) {
   uint64_t x, y;
   clingo_solve_result_bitset_t solve_ret;
   clingo_control_t *ctl = NULL;
-  clingo_solve_async_t *async = NULL;
+  clingo_solve_handle_t *handle = NULL;
   clingo_part_t parts[] = {{ "base", NULL, 0 }};
 
   // create a control object and pass command line arguments
@@ -94,8 +100,8 @@ int main(int argc, char const **argv) {
   if (!clingo_control_ground(ctl, parts, 1, NULL, NULL)) { goto error; }
 
   atomic_flag_test_and_set(&running);
-  // solve using a model callback
-  if (!clingo_control_solve_async(ctl, on_model, NULL, (clingo_finish_callback_t*)on_finish, &running, NULL, 0, &async)) { goto error; }
+  // create a solve handle with an attached vent handler
+  if (!clingo_control_solve(ctl, clingo_solve_mode_async | clingo_solve_mode_yield, NULL, 0, on_event, &running, &handle)) { goto error; }
 
   // let's approximate pi
   while (atomic_flag_test_and_set(&running)) {
@@ -104,11 +110,10 @@ int main(int argc, char const **argv) {
     y = rand();
     if (x * x + y * y <= (uint64_t)RAND_MAX * RAND_MAX) { incircle+= 1; }
   }
-
   printf("pi = %g\n", 4.0*incircle/samples);
 
-  // get the result (and make sure the search is running because calling the finish handler is still part of the search)
-  if (!clingo_solve_async_get(async, &solve_ret)) { goto error; }
+  // get the solve result
+  if (!clingo_solve_handle_get(handle, &solve_ret)) { goto error; }
 
   goto out;
 
@@ -119,8 +124,20 @@ error:
   ret = clingo_error_code();
 
 out:
+  // close the handle
+  if (handle) { clingo_solve_handle_close(handle); }
   if (ctl) { clingo_control_free(ctl); }
 
   return ret;
 }
 
+#else
+
+#include <stdio.h>
+
+int main(int argc, char const **argv) {
+    printf("example requires c11, which is not available on windows");
+    return 0;
+}
+
+#endif

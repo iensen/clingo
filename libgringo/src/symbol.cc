@@ -1,26 +1,33 @@
-// {{{ GPL License
+// {{{ MIT License
 
-// This file is part of gringo - a grounder for logic programs.
-// Copyright (C) Roland Kaminski
+// Copyright 2017 Roland Kaminski
 
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal in the Software without restriction, including without limitation the
+// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+// sell copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
 
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+// IN THE SOFTWARE.
 
 // }}}
 
 #include <gringo/symbol.hh>
 #include <gringo/hash_set.hh>
 #include <mutex>
+#ifdef _MSC_VER
+#pragma warning (disable : 4200) // nonstandard extension used: zero-sized array in struct/union
+#endif
 
 namespace Gringo {
 
@@ -34,6 +41,7 @@ uint16_t upper(uint64_t rep) { return rep >> 48; }
 uint8_t lower(uint64_t rep) { return rep & 3; }
 uintptr_t ptr(uint64_t rep) { return static_cast<uintptr_t>(rep & 0xFFFFFFFFFFFC); }
 uint64_t combine(uint16_t u, uintptr_t ptr, uint8_t l) {
+    (void)lowerMax;
     assert(l <= lowerMax);
     return static_cast<uint64_t>(u) << 48 | ptr | l;
 }
@@ -45,14 +53,14 @@ uint64_t setUpper(uint16_t u, uint64_t rep) { return combine(u, 0, 0) | (rep & 0
 //}
 
 enum class SymbolType_ : uint8_t {
-    Inf = clingo_symbol_type_infimum,
-    Num = clingo_symbol_type_number,
-    IdP = clingo_symbol_type_number+1,
-    IdN = clingo_symbol_type_number+2,
-    Str = clingo_symbol_type_string,
-    Fun = clingo_symbol_type_function,
-    Special = clingo_symbol_type_supremum-1,
-    Sup = clingo_symbol_type_supremum
+    Inf = 0,
+    Num = 1,
+    IdP = 2,
+    IdN = 3,
+    Str = 4,
+    Fun = 5,
+    Special = 6,
+    Sup = 7
 };
 SymbolType_ symbolType_(uint64_t rep) { return static_cast<SymbolType_>(upper(rep)); }
 template <class T>
@@ -256,7 +264,7 @@ uint32_t Sig::arity() const {
     return u < upperMax ? u : cast<USig::Type>(rep())->second;
 }
 
-bool Sig::sign() const { return lower(rep()); }
+bool Sig::sign() const { return lower(rep()) != 0; }
 
 size_t Sig::hash() const { return get_value_hash(rep()); }
 
@@ -308,7 +316,7 @@ Symbol Symbol::createTuple(SymSpan args) {
 
 Symbol Symbol::createFun(String name, SymSpan args, bool sign) {
     return args.size != 0
-        ?  Symbol(combine(static_cast<uint16_t>(SymbolType_::Fun), reinterpret_cast<uintptr_t>(UFun::encode(std::make_pair(Sig(name, args.size, sign), args))), 0))
+        ?  Symbol(combine(static_cast<uint16_t>(SymbolType_::Fun), reinterpret_cast<uintptr_t>(UFun::encode(std::make_pair(Sig(name, numeric_cast<uint32_t>(args.size), sign), args))), 0))
         : createId(name, sign);
 }
 

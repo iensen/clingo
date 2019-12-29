@@ -8,9 +8,9 @@ def main(prg):
         prg.assign_external(clingo.Function("p"), True)
         prg.solve()
         prg.assign_external(clingo.Function("p"), False)
-        f = prg.solve_async()
-        f.wait(0.01)
-        f.cancel()
+        with prg.solve(async_=True) as handle:
+            handle.wait(0.01)
+            prg.interrupt()
 
 #end.
 

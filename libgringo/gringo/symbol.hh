@@ -1,20 +1,24 @@
-// {{{ GPL License
+// {{{ MIT License
 
-// This file is part of gringo - a grounder for logic programs.
-// Copyright (C) Roland Kaminski
+// Copyright 2017 Roland Kaminski
 
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal in the Software without restriction, including without limitation the
+// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+// sell copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
 
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+// IN THE SOFTWARE.
 
 // }}}
 
@@ -33,7 +37,6 @@
 #include <iterator>
 #include <algorithm>
 #include <utility>
-#include <clingo.h>
 #include <potassco/basic_types.h>
 
 namespace Gringo {
@@ -91,7 +94,7 @@ inline std::ostream &operator<<(std::ostream &out, String x) {
 class Sig {
 public:
     Sig(String name, uint32_t arity, bool sign);
-    explicit Sig(clingo_signature_t rep) : rep_(rep) {  }
+    explicit Sig(uint64_t rep) : rep_(rep) {  }
     String name() const;
     Sig flipSign() const;
     uint32_t arity() const;
@@ -111,7 +114,7 @@ public:
     bool operator<=(Sig s) const;
     bool operator>=(Sig s) const;
 private:
-    clingo_signature_t rep_;
+    uint64_t rep_;
 };
 
 inline std::ostream &operator<<(std::ostream &out, Sig x) {
@@ -123,12 +126,12 @@ inline std::ostream &operator<<(std::ostream &out, Sig x) {
 // {{{1 declaration of Symbol (flyweight)
 
 enum class SymbolType : uint8_t {
-    Inf     = clingo_symbol_type_infimum,
-    Num     = clingo_symbol_type_number,
-    Str     = clingo_symbol_type_string,
-    Fun     = clingo_symbol_type_function,
-    Special = clingo_symbol_type_supremum-1,
-    Sup     = clingo_symbol_type_supremum
+    Inf     = 0,
+    Num     = 1,
+    Str     = 4,
+    Fun     = 5,
+    Special = 6,
+    Sup     = 7
 };
 inline std::ostream &operator<<(std::ostream &out, SymbolType sym) {
     switch (sym) {
@@ -151,7 +154,7 @@ class Symbol {
 public:
     // construction
     Symbol(); // createSpecial
-    explicit Symbol(clingo_symbol_t sym) : rep_(sym) { };
+    explicit Symbol(uint64_t sym) : rep_(sym) { };
     static Symbol createId(String val, bool sign = false);
     static Symbol createStr(String val);
     static Symbol createNum(int num);
@@ -191,7 +194,7 @@ public:
 
     uint64_t const &rep () const { return rep_; }
 private:
-    clingo_symbol_t rep_;
+    uint64_t rep_;
 };
 
 inline std::ostream& operator<<(std::ostream& out, Symbol sym) {

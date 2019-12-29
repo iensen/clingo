@@ -1,20 +1,24 @@
-// {{{ GPL License
+// {{{ MIT License
 
-// This file is part of gringo - a grounder for logic programs.
-// Copyright (C) 2013  Roland Kaminski
+// Copyright 2017 Roland Kaminski
 
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal in the Software without restriction, including without limitation the
+// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+// sell copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
 
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+// IN THE SOFTWARE.
 
 // }}}
 
@@ -29,7 +33,6 @@
 #include <functional>
 
 #include <iostream>
-#include <clingo.h>
 
 namespace Gringo {
 
@@ -47,12 +50,27 @@ public:
 
 // {{{1 declaration of Logger
 
-using Warnings = clingo_warning;
-using Errors = clingo_error;
+enum class Errors : int {
+    Success   = 0,
+    Runtime   = 1,
+    Logic     = 2,
+    Bad_alloc = 3,
+    Unknown   = 4
+};
+
+enum class Warnings : int {
+    OperationUndefined = 0,
+    RuntimeError       = 1,
+    AtomUndefined      = 2,
+    FileIncluded       = 3,
+    VariableUnbounded  = 4,
+    GlobalVariable     = 5,
+    Other              = 6,
+};
 
 class Logger {
 public:
-    using Printer = std::function<void (clingo_warning_t, char const *)>;
+    using Printer = std::function<void (Warnings, char const *)>;
     Logger(Printer p = nullptr, unsigned limit = 20)
     : p_(p)
     , limit_(limit) { }
@@ -60,12 +78,12 @@ public:
     bool check(Warnings id);
     bool hasError() const;
     void enable(Warnings id, bool enable);
-    void print(clingo_warning_t code, char const *msg);
+    void print(Warnings code, char const *msg);
     ~Logger();
 private:
     Printer p_;
     unsigned limit_;
-    std::bitset<clingo_warning_other+1> disabled_;
+    std::bitset<static_cast<int>(Warnings::Other)+1> disabled_;
     bool error_ = false;
 };
 
@@ -73,16 +91,17 @@ private:
 
 // {{{1 definition of Logger
 
-inline bool Logger::check(Errors) {
-    if (!limit_ && error_) { throw MessageLimitError("too many messages."); }
-    if (limit_) { --limit_; }
-    error_ = true;
-    return true;
-}
-
 inline bool Logger::check(Warnings id) {
-    if (!limit_ && error_) { throw MessageLimitError("too many messages."); }
-    return !disabled_[id] && limit_ && (--limit_, true);
+    if (id == Warnings::RuntimeError) {
+        if (!limit_ && error_) { throw MessageLimitError("too many messages."); }
+        if (limit_) { --limit_; }
+        error_ = true;
+        return true;
+    }
+    else {
+        if (!limit_ && error_) { throw MessageLimitError("too many messages."); }
+        return !disabled_[static_cast<int>(id)] && limit_ && (--limit_, true);
+    }
 }
 
 inline bool Logger::hasError() const {
@@ -90,10 +109,10 @@ inline bool Logger::hasError() const {
 }
 
 inline void Logger::enable(Warnings id, bool enabled) {
-    disabled_[id] = !enabled;
+    disabled_[static_cast<int>(id)] = !enabled;
 }
 
-inline void Logger::print(clingo_warning_t code, char const *msg) {
+inline void Logger::print(Warnings code, char const *msg) {
     if (p_) { p_(code, msg); }
     else {
         fprintf(stderr, "%s\n", msg);
@@ -107,12 +126,12 @@ inline Logger::~Logger() { }
 
 class Report {
 public:
-    Report(Logger &p, clingo_warning_t code) : p_(p), code_(code) { }
+    Report(Logger &p, Warnings code) : p_(p), code_(code) { }
     ~Report() { p_.print(code_, out.str().c_str()); }
     std::ostringstream out;
 private:
     Logger &p_;
-    clingo_warning_t code_;
+    Warnings code_;
 };
 
 // }}}1

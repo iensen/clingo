@@ -44,7 +44,7 @@ bool init(clingo_propagate_init_t *init, propagator_t *data) {
   // note that the code below assumes that this literal is not negative
   // which holds for the pigeon problem but not in general
   clingo_literal_t max = 0;
-  clingo_symbolic_atoms_t *atoms;
+  clingo_symbolic_atoms_t const *atoms;
   clingo_signature_t sig;
   clingo_symbolic_atom_iterator_t atoms_it, atoms_ie;
   // ensure that solve can be called multiple times
@@ -198,8 +198,7 @@ bool undo(clingo_propagate_control_t *control, const clingo_literal_t *changes, 
   return true;
 }
 
-bool on_model(clingo_model_t *model, void *data, bool *goon) {
-  (void)data;
+bool print_model(clingo_model_t const *model) {
   bool ret = true;
   clingo_symbol_t *atoms = NULL;
   size_t atoms_n;
@@ -246,7 +245,6 @@ bool on_model(clingo_model_t *model, void *data, bool *goon) {
   }
 
   printf("\n");
-  *goon = true;
   goto out;
 
 error:
@@ -257,6 +255,35 @@ out:
   if (str)   { free(str); }
 
   return ret;
+}
+
+bool solve(clingo_control_t *ctl, clingo_solve_result_bitset_t *result) {
+  bool ret = true;
+  clingo_solve_handle_t *handle;
+  clingo_model_t const *model;
+
+  // get a solve handle
+  if (!clingo_control_solve(ctl, clingo_solve_mode_yield, NULL, 0, NULL, NULL, &handle)) { goto error; }
+  // loop over all models
+  while (true) {
+    if (!clingo_solve_handle_resume(handle)) { goto error; }
+    if (!clingo_solve_handle_model(handle, &model)) { goto error; }
+    // print the model
+    if (model) { print_model(model); }
+    // stop if there are no more models
+    else       { break; }
+  }
+  // close the solve handle
+  if (!clingo_solve_handle_get(handle, result)) { goto error; }
+
+  goto out;
+
+error:
+  ret = false;
+
+out:
+  // free the solve handle
+  return clingo_solve_handle_close(handle) && ret;
 }
 
 int main(int argc, char const **argv) {
@@ -273,10 +300,10 @@ int main(int argc, char const **argv) {
   // create a propagator with the functions above
   // using the default implementation for the model check
   clingo_propagator_t prop = {
-    (bool (*) (clingo_propagate_init_t *, void *))init,
-    (bool (*) (clingo_propagate_control_t *, clingo_literal_t const *, size_t, void *))propagate,
-    (bool (*) (clingo_propagate_control_t *, clingo_literal_t const *, size_t, void *))undo,
-    NULL
+    (clingo_propagator_init_callback_t)init,
+    (clingo_propagator_propagate_callback_t)propagate,
+    (clingo_propagator_undo_callback_t)undo,
+    NULL,
   };
   // user data for the propagator
   propagator_t prop_data = { NULL, 0, NULL, 0 };
@@ -290,7 +317,7 @@ int main(int argc, char const **argv) {
   if (!clingo_control_new(argv+1, argc-1, NULL, NULL, 20, &ctl) != 0) { goto error; }
 
   // register the propagator
-  if (!clingo_control_register_propagator(ctl, prop, &prop_data, false)) { goto error; }
+  if (!clingo_control_register_propagator(ctl, &prop, &prop_data, false)) { goto error; }
 
   // add a logic program to the pigeon part
   if (!clingo_control_add(ctl, "pigeon", params, sizeof(params)/sizeof(*params),
@@ -300,7 +327,7 @@ int main(int argc, char const **argv) {
   if (!clingo_control_ground(ctl, parts, 1, NULL, NULL)) { goto error; }
 
   // solve using a model callback
-  if (!clingo_control_solve(ctl, on_model, NULL, NULL, 0, &solve_ret)) { goto error; }
+  if (!solve(ctl, &solve_ret)) { goto error; }
 
   goto out;
 

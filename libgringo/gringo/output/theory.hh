@@ -1,20 +1,24 @@
-// {{{ GPL License
+// {{{ MIT License
 
-// This file is part of gringo - a grounder for logic programs.
-// Copyright (C) 2013  Roland Kaminski
+// Copyright 2017 Roland Kaminski
 
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal in the Software without restriction, including without limitation the
+// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+// sell copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
 
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+// IN THE SOFTWARE.
 
 // }}}
 
@@ -23,9 +27,9 @@
 
 #include <gringo/base.hh>
 #include <gringo/terms.hh>
+#include <gringo/types.hh>
 #include <gringo/hash_set.hh>
 #include <potassco/theory_data.h>
-#include <gringo/control.hh>
 #include <functional>
 
 namespace Gringo { namespace Output {
@@ -37,7 +41,22 @@ using Gringo::GetName;
 
 // {{{1 declaration of TheoryData
 
-class TheoryData {
+class TheoryOutput {
+public:
+    using Id_t = Potassco::Id_t;
+    using IdSpan = Potassco::IdSpan;
+
+    virtual void theoryTerm(Id_t termId, int number) = 0;
+    virtual void theoryTerm(Id_t termId, const StringSpan& name) = 0;
+    virtual void theoryTerm(Id_t termId, int cId, const IdSpan& args) = 0;
+    virtual void theoryElement(Id_t elementId, IdSpan const & terms, LitVec const &cond) = 0;
+    virtual void theoryAtom(Id_t atomOrZero, Id_t termId, const IdSpan& elements) = 0;
+    virtual void theoryAtom(Id_t atomOrZero, Id_t termId, const IdSpan& elements, Id_t op, Id_t rhs) = 0;
+
+    virtual ~TheoryOutput() = default;
+};
+
+class TheoryData : private Potassco::TheoryData::Visitor {
     using TIdSet = HashSet<Potassco::Id_t>;
     using AtomSet = HashSet<uintptr_t>;
     using ConditionVec = std::vector<LitVec>;
@@ -47,8 +66,8 @@ public:
     ~TheoryData() noexcept;
     Potassco::Id_t addTerm(int number);
     Potassco::Id_t addTerm(char const *name);
-    Potassco::Id_t addTerm(Potassco::Id_t funcSym, Potassco::IdSpan const& terms);
-    Potassco::Id_t addTerm(Potassco::Tuple_t type, Potassco::IdSpan const& terms);
+    Potassco::Id_t addTermFun(Potassco::Id_t funcSym, Potassco::IdSpan const& terms);
+    Potassco::Id_t addTermTup(Potassco::Tuple_t type, Potassco::IdSpan const& terms);
     Potassco::Id_t addTerm(Symbol value);
     Potassco::Id_t addElem(Potassco::IdSpan const &tuple, LitVec &&cond);
     std::pair<Potassco::TheoryAtom const &, bool> addAtom(std::function<Potassco::Id_t()> newAtom, Potassco::Id_t termId, Potassco::IdSpan const &elems);
@@ -62,7 +81,15 @@ public:
     void setCondition(Potassco::Id_t elementId, Potassco::Id_t newCond);
     bool hasConditions() const;
     void reset(bool resetData);
+    void output(TheoryOutput &tout);
     Potassco::TheoryAtom const &getAtom(Id_t offset) const { return **(data_.begin() + offset); }
+private:
+    void print(Potassco::Id_t termId, const Potassco::TheoryTerm& term);
+    void print(const Potassco::TheoryAtom& a);
+    void visit(Potassco::TheoryData const &data, Potassco::Id_t termId, Potassco::TheoryTerm const &t) override;
+    void visit(Potassco::TheoryData const &data, Potassco::Id_t elemId, Potassco::TheoryElement const &e) override;
+    void visit(Potassco::TheoryData const &data, Potassco::TheoryAtom const &a) override;
+    bool addSeen(std::vector<bool>& vec, Potassco::Id_t id) const;
 
 private:
     template <typename ...Args>
@@ -75,6 +102,10 @@ private:
     AtomSet atoms_;
     Potassco::TheoryData &data_;
     ConditionVec conditions_;
+    std::vector<bool> tSeen_;
+    std::vector<bool> eSeen_;
+    TheoryOutput *out_;
+    uint32_t aSeen_;
 };
 
 // {{{1 declaration of TheoryTerm

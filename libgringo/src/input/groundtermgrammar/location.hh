@@ -31,18 +31,18 @@
 // version 2.2 of Bison.
 
 /**
- ** \file build/release/libgringo/src/input/groundtermgrammar/location.hh
+ ** \file /home/iensen/projects/clingo/libgringo/src/input/groundtermgrammar/location.hh
  ** Define the Gringo::Input::GroundTermGrammar::location class.
  */
 
-#ifndef YY_GRINGOGROUNDTERMGRAMMAR_BUILD_RELEASE_LIBGRINGO_SRC_INPUT_GROUNDTERMGRAMMAR_LOCATION_HH_INCLUDED
-# define YY_GRINGOGROUNDTERMGRAMMAR_BUILD_RELEASE_LIBGRINGO_SRC_INPUT_GROUNDTERMGRAMMAR_LOCATION_HH_INCLUDED
+#ifndef YY_GRINGOGROUNDTERMGRAMMAR_HOME_IENSEN_PROJECTS_CLINGO_LIBGRINGO_SRC_INPUT_GROUNDTERMGRAMMAR_LOCATION_HH_INCLUDED
+# define YY_GRINGOGROUNDTERMGRAMMAR_HOME_IENSEN_PROJECTS_CLINGO_LIBGRINGO_SRC_INPUT_GROUNDTERMGRAMMAR_LOCATION_HH_INCLUDED
 
 # include "position.hh"
 
-#line 22 "libgringo/src/input/groundtermgrammar.yy" // location.cc:296
+#line 26 "/home/iensen/projects/clingo/libgringo/src/input/groundtermgrammar.yy" // location.cc:296
 namespace Gringo { namespace Input { namespace GroundTermGrammar {
-#line 46 "build/release/libgringo/src/input/groundtermgrammar/location.hh" // location.cc:296
+#line 46 "/home/iensen/projects/clingo/libgringo/src/input/groundtermgrammar/location.hh" // location.cc:296
   /// Abstract a location.
   class location
   {
@@ -186,7 +186,7 @@ namespace Gringo { namespace Input { namespace GroundTermGrammar {
     return ostr;
   }
 
-#line 22 "libgringo/src/input/groundtermgrammar.yy" // location.cc:296
+#line 26 "/home/iensen/projects/clingo/libgringo/src/input/groundtermgrammar.yy" // location.cc:296
 } } } // Gringo::Input::GroundTermGrammar
-#line 192 "build/release/libgringo/src/input/groundtermgrammar/location.hh" // location.cc:296
-#endif // !YY_GRINGOGROUNDTERMGRAMMAR_BUILD_RELEASE_LIBGRINGO_SRC_INPUT_GROUNDTERMGRAMMAR_LOCATION_HH_INCLUDED
+#line 192 "/home/iensen/projects/clingo/libgringo/src/input/groundtermgrammar/location.hh" // location.cc:296
+#endif // !YY_GRINGOGROUNDTERMGRAMMAR_HOME_IENSEN_PROJECTS_CLINGO_LIBGRINGO_SRC_INPUT_GROUNDTERMGRAMMAR_LOCATION_HH_INCLUDED

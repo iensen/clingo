@@ -175,7 +175,7 @@ end
 
 function Observer:_heuristic(atom, type, bias, priority, condition)
     condition = table.sort_unique(self:__map_lits(condition))
-    table.append(self.__reified, Function("heuristic", {atom, tostring(type), bias, Tuple(condition)}))
+    table.append(self.__reified, Function("heuristic", {self:__map(atom), tostring(type), bias, Tuple(condition)}))
 end
 
 function Observer:_acyc_edge(node_u, node_v, condition)
@@ -227,6 +227,9 @@ function Observer:end_step()
 end
 
 function Observer:finalize()
+    if unpack == nil then
+        unpack = table.unpack
+    end
     for _, v in ipairs(self.__delayed) do
         local name, args
         name, args = v[1], v[2]
@@ -250,7 +253,7 @@ function main(prg)
     obs = Observer.new()
     prg:register_observer(obs)
     prg:ground({{"base", {}}})
-    prg:solve(nil, {{Function("b"), false}})
+    prg:solve{assumptions={{Function("b"), false}}}
     ctx = obs:finalize()
     prg:add("q", {}, "q(@get()).")
     prg:ground({{"q", {}}}, ctx)

@@ -1,20 +1,24 @@
-// {{{ GPL License
+// {{{ MIT License
 
-// This file is part of gringo - a grounder for logic programs.
-// Copyright (C) 2013  Roland Kaminski
+// Copyright 2017 Roland Kaminski
 
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal in the Software without restriction, including without limitation the
+// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+// sell copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
 
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+// IN THE SOFTWARE.
 
 // }}}
 
@@ -68,18 +72,21 @@ TEST_CASE("output-warnings", "[output]") {
         REQUIRE("([],[-:1:1-12: error: cyclic constant definition:\n  #const a=b.\n-:2:1-12: note: cycle involves definition:\n  #const b=a.\n])" == IO::to_string(solve("#const a=b.\n#const b=a.\n")));
         REQUIRE("([[]],[])" == IO::to_string(solve("#const a=a.\n")));
         REQUIRE("([],[-:2:1-12: error: redefinition of constant:\n  #const a=2.\n-:1:1-12: note: constant also defined here\n])" == IO::to_string(solve("#const a=1.\n#const a=2.\np(a).\n")));
-#ifndef _MSC_VER
-        std::ofstream("/tmp/wincluded.lp");
-        REQUIRE("([[]],[-:1:30-59: warning: already included file:\n  /tmp/wincluded.lp\n])" == IO::to_string(solve("#include \"/tmp/wincluded.lp\".#include \"/tmp/wincluded.lp\".")));
-#endif
+        struct Del {
+            Del()  { std::ofstream("wincluded.lp"); }
+            ~Del() { std::remove("wincluded.lp"); }
+        } del;
+        REQUIRE("([[]],[-:1:25-49: warning: already included file:\n  wincluded.lp\n])" == IO::to_string(solve("#include \"wincluded.lp\".#include \"wincluded.lp\".")));
+
         REQUIRE(
             "([[x=1,y=-1,z=0]],"
-            "[warning: unbounded constraint variable:\n  domain of 'x' is set to [1,1]\n"
+            "[warning: unbounded constraint variable:\n  domain of 'z' is set to [0,0]\n"
             ",warning: unbounded constraint variable:\n  domain of 'y' is set to [-1,-1]\n"
-            ",warning: unbounded constraint variable:\n  domain of 'z' is set to [0,0]\n"
+            ",warning: unbounded constraint variable:\n  domain of 'x' is set to [1,1]\n"
             "])" == IO::to_string(solve("$x $> 0.\n$y $< 0.\na:-$z $> 0.\n")));
         REQUIRE("([[]],[-:1:1-12: info: no constraint variables over signature occur in program:\n  $y/0\n])" == IO::to_string(solve("#show $y/0.")));
         REQUIRE("([[]],[info: constraint variable does not occur in program:\n  $y\n])" == IO::to_string(solve("#show $y.")));
+        REQUIRE("([[]],[-:1:28-29: info: atom does not occur in any rule head:\n  c\n])" == IO::to_string(solve("#defined b/0. a :- b. a :- c.")));
     }
 }
 

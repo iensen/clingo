@@ -3,8 +3,7 @@
 #include <stdio.h>
 #include <assert.h>
 
-bool on_model(clingo_model_t *model, void *data, bool *goon) {
-  (void)data;
+bool print_model(clingo_model_t const *model) {
   bool ret = true;
   clingo_symbol_t *atoms = NULL;
   size_t atoms_n;
@@ -51,7 +50,6 @@ bool on_model(clingo_model_t *model, void *data, bool *goon) {
   }
 
   printf("\n");
-  *goon = true;
   goto out;
 
 error:
@@ -64,13 +62,42 @@ out:
   return ret;
 }
 
+bool solve(clingo_control_t *ctl, clingo_solve_result_bitset_t *result) {
+  bool ret = true;
+  clingo_solve_handle_t *handle;
+  clingo_model_t const *model;
+
+  // get a solve handle
+  if (!clingo_control_solve(ctl, clingo_solve_mode_yield, NULL, 0, NULL, NULL, &handle)) { goto error; }
+  // loop over all models
+  while (true) {
+    if (!clingo_solve_handle_resume(handle)) { goto error; }
+    if (!clingo_solve_handle_model(handle, &model)) { goto error; }
+    // print the model
+    if (model) { print_model(model); }
+    // stop if there are no more models
+    else       { break; }
+  }
+  // close the solve handle
+  if (!clingo_solve_handle_get(handle, result)) { goto error; }
+
+  goto out;
+
+error:
+  ret = false;
+
+out:
+  // free the solve handle
+  return clingo_solve_handle_close(handle) && ret;
+}
+
 int main(int argc, char const **argv) {
   char const *error_message;
   int ret = 0;
   size_t offset;
   clingo_solve_result_bitset_t solve_ret;
   clingo_control_t *ctl;
-  clingo_symbolic_atoms_t *atoms;
+  clingo_symbolic_atoms_t const *atoms;
   clingo_backend_t *backend;
   clingo_atom_t atom_ids[4];
   char const *atom_strings[] = {"a", "b", "c"};
@@ -111,8 +138,11 @@ int main(int argc, char const **argv) {
   // get the backend
   if (!clingo_control_backend(ctl, &backend)) { goto error; }
 
+  // prepare the backend for adding rules
+  if (!clingo_backend_begin(backend)) { goto error; }
+
   // add an additional atom (called d below)
-  if (!clingo_backend_add_atom(backend, &atom_ids[3])) { goto error; }
+  if (!clingo_backend_add_atom(backend, NULL, &atom_ids[3])) { goto error; }
 
   // add rule: d :- a, b.
   body[0] = atom_ids[0];
@@ -124,8 +154,11 @@ int main(int argc, char const **argv) {
   body[1] = atom_ids[2];
   if (!clingo_backend_rule(backend, false, NULL, 0, body, sizeof(body)/sizeof(*body))) { goto error; }
 
-  // solve using a model callback
-  if (!clingo_control_solve(ctl, on_model, NULL, NULL, 0, &solve_ret)) { goto error; }
+  // finalize the backend
+  if (!clingo_backend_end(backend)) { goto error; }
+
+  // solve
+  if (!solve(ctl, &solve_ret)) { goto error; }
 
   goto out;
 

@@ -1,20 +1,24 @@
-// {{{ GPL License
+// {{{ MIT License
 
-// This file is part of gringo - a grounder for logic programs.
-// Copyright Roland Kaminski
+// Copyright 2017 Roland Kaminski
 
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal in the Software without restriction, including without limitation the
+// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+// sell copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
 
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+// IN THE SOFTWARE.
 
 // }}}
 
@@ -23,6 +27,9 @@
 #include <map>
 #include <unordered_set>
 #include <cassert>
+#include <mutex>
+#include <condition_variable>
+#include <set>
 
 #include <iostream>
 
@@ -139,7 +146,7 @@ private:
     }
 
     int map_item(std::string &&item) {
-        auto &ret = *item_map_.emplace(std::move(item), item_map_.size()).first;
+        auto &ret = *item_map_.emplace(std::move(item), static_cast<int>(item_map_.size())).first;
         return ret.second;
     }
 
@@ -171,9 +178,7 @@ private:
     }
 
     void initialize_occurrence_lists() {
-        for (auto &item : item_map_) {
-            occurrence_list_.emplace_back();
-        }
+        occurrence_list_.resize(occurrence_list_.size() + item_map_.size());
         int sid = 0;
         std::unordered_set<int> seen;
         for (auto &seq : sequence_atoms_) {
@@ -187,7 +192,7 @@ private:
     }
 
     void initialize_states(PropagateInit &init) {
-        for (int i = 0; i < init.number_of_threads(); ++i) { states_.emplace_back(pattern_length_, sequence_atoms_.size()); }
+        for (int i = 0; i < init.number_of_threads(); ++i) { states_.emplace_back(pattern_length_, static_cast<int>(sequence_atoms_.size())); }
     }
 
     // {{{2 propagation
@@ -241,7 +246,7 @@ public:
         auto &state = states_[ctl.thread_id()];
         uint32_t dl = ctl.assignment().decision_level();
         if (state.trail.size() == 0 || state.trail.back().decision_level < dl) {
-            state.trail.emplace_back(dl, state.stack.size());
+            state.trail.emplace_back(dl, static_cast<int>(state.stack.size()));
         }
         for (auto &lit : changes) {
             for (auto &pat_atom : pattern_atoms_[lit]) {
@@ -424,8 +429,29 @@ private:
     literal_t a_;
     literal_t b_;
     literal_t c_;
-    int count_ = 0;
+    size_t count_ = 0;
 };
+
+literal_t get_literal(PropagateInit &init, char const *name) {
+    return init.solver_literal(init.symbolic_atoms().find(Id(name))->literal());
+}
+
+template <typename T>
+class TestInit : public Propagator {
+public:
+    TestInit(T &&f) : f_{std::forward<T>(f)} { }
+    void init(PropagateInit &init) override {
+        f_(init);
+    }
+private:
+    T f_;
+};
+
+template <typename T>
+static TestInit<T> make_init(T &&f) {
+    return {std::forward<T>(f)};
+}
+
 
 class TestAddClause : public Propagator {
 public:
@@ -448,7 +474,53 @@ public:
 private:
     literal_t a_;
     literal_t b_;
-    int count_ = 0;
+    size_t count_ = 0;
+};
+
+class TestAddWatch : public Propagator {
+public:
+    void init(PropagateInit &init) override {
+        REQUIRE(init.number_of_threads() == 2);
+        a = init.solver_literal(init.symbolic_atoms().find(Id("a"))->literal());
+        b = init.solver_literal(init.symbolic_atoms().find(Id("b"))->literal());
+        auto c = init.solver_literal(init.symbolic_atoms().find(Id("c"))->literal());
+        auto d = init.solver_literal(init.symbolic_atoms().find(Id("d"))->literal());
+        init.add_watch(a, 0);
+        init.add_watch(-a, 0);
+        init.add_watch(b, 0);
+        init.add_watch(-b, 0);
+        init.add_watch(-b, 1);
+        init.add_watch(b, 1);
+        auto assignment = init.assignment();
+        REQUIRE(assignment.truth_value(a) == Clingo::TruthValue::Free);
+        REQUIRE(assignment.truth_value(b) == Clingo::TruthValue::Free);
+        REQUIRE(assignment.truth_value(c) == Clingo::TruthValue::True);
+        REQUIRE(assignment.truth_value(d) == Clingo::TruthValue::False);
+        done_ = false;
+    }
+    void propagate(PropagateControl &ctl, LiteralSpan changes) override {
+        if (ctl.thread_id() == 0) {
+            // wait for thread 1 to propagate b
+            std::unique_lock<decltype(mut_)> lock(mut_);
+            cv.wait(lock, [this]() { return done_; });
+        }
+        else {
+            for (auto lit : changes) {
+                std::lock_guard<decltype(mut_)> lock(mut_);
+                done_ = true;
+                propagated.insert(std::abs(lit));
+            }
+            cv.notify_one();
+        }
+    }
+public:
+    std::set<literal_t> propagated;
+    literal_t a;
+    literal_t b;
+private:
+    std::mutex mut_;
+    std::condition_variable cv;
+    bool done_;
 };
 
 class TestException : public Propagator {
@@ -456,6 +528,29 @@ public:
     void check(PropagateControl &) override {
         throw std::runtime_error("the answer is 42");
     }
+};
+
+class TestMode : public Propagator {
+public:
+    void init(PropagateInit &init) override {
+        auto atoms = init.symbolic_atoms();
+        auto sig = Clingo::Signature("p", 1);
+        for (auto atom : Clingo::make_range(atoms.begin(sig), atoms.end())) {
+            lits_.insert(init.solver_literal(atom.literal()));
+        }
+        init.set_check_mode(Clingo::PropagatorCheckMode::Partial);
+    }
+    void check(PropagateControl &ctl) override {
+        //if (!ctl.assignment().is_total()) { throw std::logic_error("unexpected total check"); }
+        for (auto &lit : lits_) {
+            if (ctl.assignment().truth_value(lit) == Clingo::TruthValue::Free) {
+                ctl.add_clause({lit});
+                break;
+            }
+        }
+    }
+private:
+    std::set<Clingo::literal_t> lits_;
 };
 
 TEST_CASE("propagator", "[clingo][propagator]") {
@@ -470,12 +565,12 @@ TEST_CASE("propagator", "[clingo][propagator]") {
         auto place = [](int p, int h) { return Function("place", {Number(p), Number(h)}); };
         SECTION("unsat") {
             ctl.ground({{"pigeon", {Number(5), Number(6)}}}, nullptr);
-            ctl.solve(MCB(models));
+            test_solve(ctl.solve(), models);
             REQUIRE(models.empty());
         }
         SECTION("sat") {
             ctl.ground({{"pigeon", {Number(2), Number(2)}}}, nullptr);
-            ctl.solve(MCB(models));
+            test_solve(ctl.solve(), models);
             REQUIRE(models == ModelVec({{place(1,1), place(2,2)}, {place(1,2), place(2,1)}}));
         }
     }
@@ -484,8 +579,30 @@ TEST_CASE("propagator", "[clingo][propagator]") {
         ctl.register_propagator(p, false);
         ctl.add("base", {}, "{a; b}. c.");
         ctl.ground({{"base", {}}}, nullptr);
-        ctl.solve(MCB(models));
+        test_solve(ctl.solve(), models);
         REQUIRE(models.size() == 4);
+    }
+    SECTION("mode") {
+        TestMode prop;
+        ctl.register_propagator(prop, false);
+        ctl.add("base", {}, "{p(1..9)}.");
+        ctl.ground({{"base", {}}}, nullptr);
+        test_solve(ctl.solve(), models);
+        auto p = [](int n) { return Function("p", {Number(n)}); };
+        REQUIRE(models == ModelVec({{ p(1), p(2), p(3), p(4), p(5), p(6), p(7), p(8), p(9) }}));
+    }
+    SECTION("add_watch") {
+        TestAddWatch prop;
+        ctl.configuration()["solve"]["parallel_mode"] = "2";
+        ctl.register_propagator(prop, false);
+        ctl.add("base", {}, "{a;b;c;d}. c. :- d.");
+        ctl.ground({{"base", {}}}, nullptr);
+        test_solve(ctl.solve(), models);
+        auto a = Function("a", {});
+        auto b = Function("b", {});
+        auto c = Function("c", {});
+        REQUIRE(models == ModelVec({{ a, b, c }, { a, c }, { b, c }, { c }}));
+        REQUIRE(prop.propagated == std::set<literal_t>{prop.b});
     }
     SECTION("exception") {
         TestException p;
@@ -493,28 +610,32 @@ TEST_CASE("propagator", "[clingo][propagator]") {
         ctl.add("base", {}, "{a}.");
         ctl.ground({{"base", {}}}, nullptr);
         try {
-            ctl.solve(MCB(models));
+            test_solve(ctl.solve(), models);
             FAIL("solve must throw");
         }
         catch (std::runtime_error const &e) { REQUIRE(e.what() == S("the answer is 42")); }
     }
-#if defined(WITH_THREADS) && WITH_THREADS == 1
     SECTION("exception-t2") {
-        ctl.configuration()["solve.parallel_mode"] = "2";
-        TestException p;
-        ctl.register_propagator(p, false);
-        ctl.add("base", {}, "{a}.");
-        ctl.ground({{"base", {}}}, nullptr);
-        try {
-            ctl.solve(MCB(models));
-            FAIL("solve must throw");
+        bool skip = false;
+        try { ctl.configuration()["solve.parallel_mode"] = "2"; }
+        catch (std::exception const &e) {
+            if (std::strcmp(e.what(), "invalid key") == 0) { skip = true; }
+            else { throw; }
         }
-        catch (std::runtime_error const &e) {
-            // NOTE: in the multithreaded case a runtime error is thrown after the last thread died
-            REQUIRE(e.what() == S("RUNTIME ERROR!"));
+        if (!skip) {
+            TestException p;
+            ctl.register_propagator(p, false);
+            ctl.add("base", {}, "{a}.");
+            ctl.ground({{"base", {}}}, nullptr);
+            try {
+                test_solve(ctl.solve(), models);
+                FAIL("solve must throw");
+            }
+            catch (std::runtime_error const &e) {
+                REQUIRE(e.what() == S("the answer is 42"));
+            }
         }
     }
-#endif
     SECTION("add_clause") {
         TestAddClause p;
         ctl.register_propagator(p, false);
@@ -522,41 +643,154 @@ TEST_CASE("propagator", "[clingo][propagator]") {
             p.type = ClauseType::Learnt;
             ctl.add("base", {}, "{a; b}.");
             ctl.ground({{"base", {}}}, nullptr);
-            ctl.solve(MCB(models));
+            test_solve(ctl.solve(), models);
             REQUIRE(models.size() == 3);
             p.enable = false;
-            ctl.solve(MCB(models));
+            test_solve(ctl.solve(), models);
             REQUIRE(models.size() >= 3);
         }
         SECTION("static") {
             p.type = ClauseType::Static;
             ctl.add("base", {}, "{a; b}.");
             ctl.ground({{"base", {}}}, nullptr);
-            ctl.solve(MCB(models));
+            test_solve(ctl.solve(), models);
             REQUIRE(models.size() == 3);
             p.enable = false;
-            ctl.solve(MCB(models));
+            test_solve(ctl.solve(), models);
             REQUIRE(models.size() == 3);
         }
         SECTION("volatile") {
             p.type = ClauseType::Volatile;
             ctl.add("base", {}, "{a; b}.");
             ctl.ground({{"base", {}}}, nullptr);
-            ctl.solve(MCB(models));
+            test_solve(ctl.solve(), models);
             REQUIRE(models.size() == 3);
             p.enable = false;
-            ctl.solve(MCB(models));
+            test_solve(ctl.solve(), models);
             REQUIRE(models.size() == 4);
         }
         SECTION("volatile static") {
             p.type = ClauseType::VolatileStatic;
             ctl.add("base", {}, "{a; b}.");
             ctl.ground({{"base", {}}}, nullptr);
-            ctl.solve(MCB(models));
+            test_solve(ctl.solve(), models);
             REQUIRE(models.size() == 3);
             p.enable = false;
-            ctl.solve(MCB(models));
+            test_solve(ctl.solve(), models);
             REQUIRE(models.size() == 4);
+        }
+    }
+    SECTION("add_clause_init") {
+        // NOTE: some of the tests would fail if sat preprocessing were activated
+        //       because propagation has no effect in this case
+        ctl.configuration()["sat_prepro"] = "0";
+
+        ctl.add("base", {}, "{a; b}. c. :- a, b.");
+        ctl.ground({{"base", {}}}, nullptr);
+        SECTION("conflict") {
+            auto p{make_init([](Clingo::PropagateInit &init){
+                REQUIRE_FALSE(init.add_clause({-get_literal(init, "c")}));
+            })};
+            ctl.register_propagator(p, false);
+            test_solve(ctl.solve(), models);
+            REQUIRE(models.size() == 0);
+        }
+        SECTION("propagate") {
+            auto p{make_init([](Clingo::PropagateInit &init){
+                REQUIRE(init.add_clause({get_literal(init, "a")}));
+                REQUIRE(init.assignment().is_true(get_literal(init, "a")));
+                REQUIRE(init.propagate());
+                REQUIRE(init.assignment().is_false(get_literal(init, "b")));
+            })};
+            ctl.register_propagator(p, false);
+            test_solve(ctl.solve(), models);
+            REQUIRE(models.size() == 1);
+        }
+        SECTION("propagate") {
+            auto p{make_init([](Clingo::PropagateInit &init){
+                auto ass = init.assignment();
+                auto lit = init.add_literal();
+                auto a = get_literal(init, "a");
+                REQUIRE(init.add_clause({lit}));
+                REQUIRE(ass.is_true(lit));
+                REQUIRE(init.add_clause({-lit, a}));
+                REQUIRE(ass.is_true(a));
+                REQUIRE(init.propagate());
+                REQUIRE(init.assignment().is_false(get_literal(init, "b")));
+            })};
+            ctl.register_propagator(p, false);
+            test_solve(ctl.solve(), models);
+            REQUIRE(models.size() == 1);
+        }
+        SECTION("propagate") {
+            auto p{make_init([](Clingo::PropagateInit &init){
+                auto ass = init.assignment();
+                auto lit = init.add_literal();
+                auto a = get_literal(init, "a");
+                REQUIRE(init.add_clause({-lit, a}));
+                REQUIRE(init.add_clause({lit}));
+                REQUIRE(ass.is_true(lit));
+                REQUIRE(init.propagate());
+                REQUIRE(ass.is_true(a));
+                REQUIRE(init.assignment().is_false(get_literal(init, "b")));
+            })};
+            ctl.register_propagator(p, false);
+            test_solve(ctl.solve(), models);
+            REQUIRE(models.size() == 1);
+        }
+        SECTION("propagate") {
+            auto p{make_init([](Clingo::PropagateInit &init){
+                auto ass = init.assignment();
+                auto lit = init.add_literal();
+                auto a = get_literal(init, "a");
+                auto b = get_literal(init, "b");
+                REQUIRE(init.add_clause({lit}));
+                REQUIRE(ass.is_true(lit));
+                REQUIRE(init.add_clause({-lit, a}));
+                REQUIRE(init.add_clause({-lit, b}));
+                REQUIRE_FALSE(init.propagate());
+            })};
+            ctl.register_propagator(p, false);
+            test_solve(ctl.solve(), models);
+            REQUIRE(models.size() == 0);
+        }
+    }
+    SECTION("add_weight_constraint") {
+        ctl.add("base", {}, "{a; b}.");
+        ctl.ground({{"base", {}}}, nullptr);
+        SECTION("equal") {
+            auto p{make_init([](Clingo::PropagateInit &init){
+                auto t = init.add_literal();
+                auto a = get_literal(init, "a");
+                auto b = get_literal(init, "b");
+                REQUIRE(init.add_clause({t}));
+                auto l = init.add_literal();
+                REQUIRE(init.add_weight_constraint(t, {{a,1}, {b,1}, {l,1}}, 2, true));
+            })};
+            ctl.register_propagator(p, false);
+            test_solve(ctl.solve(), models);
+            REQUIRE(models.size() == 3);
+        }
+    }
+    SECTION("add_minimize") {
+        ctl.add("base", {}, "2 {a; b; c}. 2 {b; c; d}.");
+        ctl.ground({{"base", {}}}, nullptr);
+        ctl.configuration()["solve"]["opt_mode"] = "optN";
+            SECTION("minimize") {
+            auto p{make_init([](Clingo::PropagateInit &init){
+                init.add_minimize(get_literal(init, "a"), 1, 0);
+                init.add_minimize(get_literal(init, "b"), 1, 0);
+                init.add_minimize(get_literal(init, "c"), 1, 0);
+                init.add_minimize(get_literal(init, "d"), 1, 0);
+            })};
+            ctl.register_propagator(p, false);
+            {
+                MCB mcb{models};
+                for (auto &m : ctl.solve()) {
+                    if (m.optimality_proven()) { mcb(m); }
+                }
+            }
+            REQUIRE(models.size() == 1);
         }
     }
 }
@@ -565,7 +799,7 @@ TEST_CASE("propgator-sequence-mining", "[clingo][propagator]") {
     MessageVec messages;
     ModelVec models;
     Logger logger = [&messages](WarningCode code, char const *msg) { messages.emplace_back(code, msg); };
-#if defined(WITH_THREADS) && WITH_THREADS == 1
+#if defined(CLASP_HAS_THREADS) && CLASP_HAS_THREADS == 1
     Control ctl{{"-t14"}, logger, 20};
 #else
     Control ctl{{}, logger, 20};
@@ -618,7 +852,7 @@ TEST_CASE("propgator-sequence-mining", "[clingo][propagator]") {
             }
         }
         int64_t optimum = std::numeric_limits<int64_t>::max();
-        ctl.solve([&models, &optimum](Model m) {
+        for (auto &m : ctl.solve()) {
             int64_t opt = m.cost()[0];
             if (opt == optimum) {
                 models.emplace_back();
@@ -628,8 +862,7 @@ TEST_CASE("propgator-sequence-mining", "[clingo][propagator]") {
                 std::sort(models.back().begin(), models.back().end());
             }
             else { optimum = opt; }
-            return true;
-        });
+        }
         std::sort(models.begin(), models.end());
         auto pat = [](int num, char const *item) { return Function("pat", {Number(num), Id(item)}); };
         ModelVec solution = {

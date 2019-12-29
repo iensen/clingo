@@ -1,0 +1,5 @@
+# Hashes of file build rules.
+b30a3b4cb99d11a136f2fc9553dc18fa libgringo/src/input/groundtermgrammar/grammar.cc
+be5680eed373aaffd56436484bddfff3 libgringo/src/input/groundtermlexer.hh
+9ca1438c8899468b7bfc291215d02091 libgringo/src/input/nongroundgrammar/grammar.cc
+cbf613b9f4a51db83b4caf639f58e116 libgringo/src/input/nongroundlexer.hh

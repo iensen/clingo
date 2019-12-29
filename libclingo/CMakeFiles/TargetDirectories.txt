@@ -1,0 +1,3 @@
+/home/iensen/projects/plog_experiments/clingo/libclingo/CMakeFiles/rebuild_cache.dir
+/home/iensen/projects/plog_experiments/clingo/libclingo/CMakeFiles/libclingo.dir
+/home/iensen/projects/plog_experiments/clingo/libclingo/CMakeFiles/edit_cache.dir

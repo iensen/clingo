@@ -174,7 +174,7 @@ end
 
 function Observer:_heuristic(atom, type, bias, priority, condition)
     condition = table.sort_unique(self:__map_lits(condition))
-    table.append(self.__reified, Function("heuristic", {atom, tostring(type), bias, Tuple(condition)}))
+    table.append(self.__reified, Function("heuristic", {self:__map(atom), tostring(type), bias, Tuple(condition)}))
 end
 
 function Observer:_acyc_edge(node_u, node_v, condition)
@@ -199,10 +199,10 @@ function Observer:theory_term_compound(term_id, name_id_or_type, arguments)
 end
 
 function Observer:theory_element(element_id, terms, condition)
-    self.__elems[element_id] = function () 
+    self.__elems[element_id] = function ()
         condition = table.sort_unique(self:__map_lits(condition))
         return Function("elem", {Tuple(table.map(terms, function (i)
-            return self.__terms[i]() 
+            return self.__terms[i]()
         end)), Tuple(condition)})
     end
 end
@@ -226,6 +226,9 @@ function Observer:end_step()
 end
 
 function Observer:finalize()
+    if unpack == nil then
+        unpack = table.unpack
+    end
     for _, v in ipairs(self.__delayed) do
         local name, args
         name, args = v[1], v[2]
@@ -247,7 +250,7 @@ function main(prg)
     obs = Observer.new()
     prg:register_observer(obs, true)
     prg:ground({{"base", {}}})
-    prg:solve(nil, {{Function("b"), false}})
+    prg:solve{assumptions={{Function("b"), false}}}
     ctx = obs:finalize()
     prg:add("q", {}, "q(@get()).")
     prg:ground({{"q", {}}}, ctx)
@@ -255,6 +258,7 @@ function main(prg)
     print "Solving..."
     print "Answer: 1"
     print (table.concat(table.map(ctx:get(), tostring), " "))
+    io.flush()
 end
 
 #end.

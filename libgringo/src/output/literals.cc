@@ -1,27 +1,30 @@
-// {{{ GPL License
+// {{{ MIT License
 
-// This file is part of gringo - a grounder for logic programs.
-// Copyright (C) 2013  Roland Kaminski
+// Copyright 2017 Roland Kaminski
 
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal in the Software without restriction, including without limitation the
+// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+// sell copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
 
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+// IN THE SOFTWARE.
 
 // }}}
 
 #include <gringo/output/literal.hh>
 #include <gringo/output/statements.hh>
 #include <gringo/logger.hh>
-#include <gringo/control.hh>
 #include <gringo/output/aggregates.hh>
 #include <gringo/output/theory.hh>
 
@@ -91,7 +94,7 @@ bool defined(SymVec const &tuple, AggregateFunction fun, Location const &loc, Lo
     if (tuple.empty()) {
         if (fun == AggregateFunction::COUNT) { return true; }
         else {
-            GRINGO_REPORT(log, clingo_warning_operation_undefined)
+            GRINGO_REPORT(log, Warnings::OperationUndefined)
                 << loc << ": info: empty tuple ignored\n";
             return false;
         }
@@ -107,7 +110,7 @@ bool defined(SymVec const &tuple, AggregateFunction fun, Location const &loc, Lo
             else {
                 std::ostringstream s;
                 print_comma(s, tuple, ",");
-                GRINGO_REPORT(log, clingo_warning_operation_undefined)
+                GRINGO_REPORT(log, Warnings::OperationUndefined)
                     << loc << ": info: tuple ignored:\n"
                     << "  " << s.str() << "\n";
                 return false;
@@ -122,7 +125,7 @@ bool neutral(SymVec const &tuple, AggregateFunction fun, Location const &loc, Lo
     if (tuple.empty()) {
         if (fun == AggregateFunction::COUNT) { return false; }
         else {
-            GRINGO_REPORT(log, clingo_warning_operation_undefined)
+            GRINGO_REPORT(log, Warnings::OperationUndefined)
                 << loc << ": info: empty tuple ignored\n";
             return true;
         }
@@ -139,7 +142,7 @@ bool neutral(SymVec const &tuple, AggregateFunction fun, Location const &loc, Lo
         if (ret && tuple.front() != Symbol::createNum(0)) {
             std::ostringstream s;
             print_comma(s, tuple, ",");
-            GRINGO_REPORT(log, clingo_warning_operation_undefined)
+            GRINGO_REPORT(log, Warnings::OperationUndefined)
                 << loc << ": info: tuple ignored:\n"
                 << "  " << s.str() << "\n";
         }
@@ -290,7 +293,7 @@ void AggregateAtomRange::accumulate(SymVec const &tuple, bool fact, bool remove)
 class BodyAggregateElements_::TupleOffset {
 public:
     TupleOffset(Id_t offset, Id_t size, bool fact)
-    : repr_(fact | (static_cast<uint64_t>(size) << 1) | (static_cast<uint64_t>(offset) << 32)) { }
+    : repr_(static_cast<uint64_t>(fact) | (static_cast<uint64_t>(size) << 1) | (static_cast<uint64_t>(offset) << 32)) { }
     TupleOffset(uint64_t repr)
     : repr_(repr) { }
     bool fact() const { return repr_ & 1; }
@@ -305,7 +308,7 @@ private:
 class BodyAggregateElements_::ClauseOffset {
 public:
     ClauseOffset(Id_t offset, Id_t size)
-    : repr_(std::max(size-1, Id_t(3)) | (offset << 2)) {
+    : repr_(std::min(size-1, Id_t(3)) | (offset << 2)) {
         assert(size > 0);
     }
     ClauseOffset(uint32_t repr)
@@ -654,10 +657,9 @@ bool DisjointAtom::translate(DomainData &data, Translator &x, Logger &log) {
                 Rule rule;
                 if (cond.second > 0) { rule.addBody(getEqualClause(data, x, cond, true, false)); }
                 if ((it-1)->second)          { rule.addBody(LiteralId{NAF::NOT, AtomType::Aux, (it-1)->second, 0}); }
-                if (it != bound.atoms.end()) { rule.addBody(LiteralId{NAF::POS, AtomType::Aux, it->second, 0}); }
+                if (it != bound.atoms.end()) { rule.addBody(LiteralId{NAF::POS, AtomType::Aux, it->second, 0}); ++it; }
                 rule.addHead(aux).translate(data, x);
                 values.insert(i*coef + fixed);
-                ++it;
             }
         };
         for (auto &condVal : elem.second) {
@@ -869,6 +871,68 @@ void HeadAggregateAtom::accumulate(DomainData &data, Location const &loc, SymVec
 
 // }}}1
 
+// {{{1 definition of PredicateDomain
+
+std::pair<Id_t, Id_t> PredicateDomain::cleanup(AssignmentLookup assignment, Mapping &map) {
+    Id_t facts = 0;
+    Id_t deleted = 0;
+    Id_t oldOffset = 0;
+    Id_t newOffset = 0;
+    reset();
+    //std::cerr << "cleaning " << sig_ << std::endl;
+    atoms_.erase([&](PredicateAtom &atom) {
+        if (!atom.defined()) {
+            ++deleted;
+            ++oldOffset;
+            return true;
+        }
+        if (atom.hasUid()) {
+            auto value = assignment(atom.uid());
+            if (!value.first) {
+                switch (value.second) {
+                    case Potassco::Value_t::True: {
+                        // NOTE: externals cannot become facts here
+                        //       because they might get new definitions while grounding
+                        //       because there is no distinction between true and weak true
+                        //       these definitions might be skipped if a weak true external
+                        //       is made a fact here
+                        if (!atom.fact()) { ++facts; }
+                        atom.setFact(true);
+                        break;
+                    }
+                    case Potassco::Value_t::False: {
+                        ++deleted;
+                        ++oldOffset;
+                        return true;
+                    }
+                    default: { break; }
+                }
+            }
+        }
+        //std::cerr << "  mapping " << static_cast<Symbol>(atom) << " from " << oldOffset << " to " << newOffset << std::endl;
+        atom.setGeneration(0);
+        atom.unmarkDelayed();
+        map.add(oldOffset, newOffset);
+        ++oldOffset;
+        ++newOffset;
+        return false;
+    });
+    //std::cerr << "remaining atoms: ";
+    //for (auto &atom : atoms_) {
+    //    std::cerr << "  " << static_cast<Symbol>(atom) << "=" << (atoms_.find(static_cast<Symbol>(atom)) != atoms_.end()) << "/" << atom.generation() << "/" << atom.defined() << "/" << atom.delayed() << std::endl;
+    //}
+    delayed_.clear();
+    generation_ = 1;
+    initOffset_ = atoms_.size();
+    initDelayedOffset_ = 0;
+    incOffset_ = map.bound(incOffset_);
+    showOffset_ = map.bound(showOffset_);
+    return {facts, deleted};
+}
+
+
+// }}}1
+
 // {{{1 definition of AuxLiteral
 
 AuxLiteral::AuxLiteral(DomainData &data, LiteralId id)
@@ -898,8 +962,8 @@ LiteralId AuxLiteral::simplify(Mappings &, AssignmentLookup assignment) const {
     auto value = assignment(id_.offset());
     if (value.second == Potassco::Value_t::Free) { return id_; }
     auto ret = data_.getTrueLit();
-    if (value.second == Potassco::Value_t::False) { ret = ret.negate(); }
-    if (id_.sign() == NAF::NOT){ ret = ret.negate(); }
+    if (value.second == Potassco::Value_t::False) { ret = ret.negate(false); }
+    if (id_.sign() == NAF::NOT){ ret = ret.negate(false); }
     return id_;
 }
 
@@ -960,7 +1024,7 @@ LiteralId PredicateLiteral::simplify(Mappings &mappings, AssignmentLookup assign
     auto offset = mappings[id_.domain()].get(id_.offset());
     if (offset == InvalidId) {
         auto ret = data_.getTrueLit();
-        if (id_.sign() != NAF::NOT){ ret = ret.negate(); }
+        if (id_.sign() != NAF::NOT){ ret = ret.negate(false); }
         return ret;
     }
     else {
@@ -970,8 +1034,8 @@ LiteralId PredicateLiteral::simplify(Mappings &mappings, AssignmentLookup assign
             auto value = assignment(atom.uid());
             if (value.second != Potassco::Value_t::Free) {
                 auto ret = data_.getTrueLit();
-                if (value.second == Potassco::Value_t::False) { ret = ret.negate(); }
-                if (id_.sign() == NAF::NOT){ ret = ret.negate(); }
+                if (value.second == Potassco::Value_t::False) { ret = ret.negate(false); }
+                if (id_.sign() == NAF::NOT){ ret = ret.negate(false); }
                 return ret;
             }
         }
@@ -1730,19 +1794,19 @@ HeadAggregateLiteral::~HeadAggregateLiteral() noexcept = default;
 
 // {{{1 definition of DomainData
 
-Gringo::TheoryData::TermType DomainData::termType(Id_t value) const {
+TheoryTermType DomainData::termType(Id_t value) const {
     auto &term = theory_.data().getTerm(value);
     switch (term.type()) {
-        case Potassco::Theory_t::Number: { return Gringo::TheoryData::TermType::Number; }
-        case Potassco::Theory_t::Symbol: { return Gringo::TheoryData::TermType::Symbol; }
+        case Potassco::Theory_t::Number: { return TheoryTermType::Number; }
+        case Potassco::Theory_t::Symbol: { return TheoryTermType::Symbol; }
         case Potassco::Theory_t::Compound: {
-            if (term.isFunction()) { return Gringo::TheoryData::TermType::Function; }
+            if (term.isFunction()) { return TheoryTermType::Function; }
             switch (term.tuple()) {
-                case Potassco::Tuple_t::Paren:   { return Gringo::TheoryData::TermType::Tuple; }
-                case Potassco::Tuple_t::Bracket: { return Gringo::TheoryData::TermType::List; }
-                case Potassco::Tuple_t::Brace:   { return Gringo::TheoryData::TermType::Set; }
+                case Potassco::Tuple_t::Paren:   { return TheoryTermType::Tuple; }
+                case Potassco::Tuple_t::Bracket: { return TheoryTermType::List; }
+                case Potassco::Tuple_t::Brace:   { return TheoryTermType::Set; }
             }
-            return Gringo::TheoryData::TermType::Number;
+            return TheoryTermType::Number;
         }
     }
     throw std::logic_error("must not happen");
@@ -1789,7 +1853,7 @@ Potassco::Id_t DomainData::atomTerm(Id_t value) const {
 }
 
 bool DomainData::atomHasGuard(Id_t value) const {
-    return theory_.getAtom(value).guard();
+    return theory_.getAtom(value).guard() != nullptr;
 }
 
 Potassco::Lit_t DomainData::atomLit(Id_t value) const {

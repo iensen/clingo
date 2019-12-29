@@ -1,20 +1,24 @@
-// {{{ GPL License
+// {{{ MIT License
 
-// This file is part of gringo - a grounder for logic programs.
-// Copyright (C) 2013  Roland Kaminski
+// Copyright 2017 Roland Kaminski
 
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal in the Software without restriction, including without limitation the
+// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+// sell copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
 
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+// IN THE SOFTWARE.
 
 // }}}
 
@@ -31,10 +35,9 @@ namespace Gringo { namespace Input {
 
 // {{{ definition of Statement::Statement
 
-Statement::Statement(UHeadAggr &&head, UBodyAggrVec &&body, StatementType type)
+Statement::Statement(UHeadAggr &&head, UBodyAggrVec &&body)
     : head(std::move(head))
-    , body(std::move(body))
-    , type(type) { }
+    , body(std::move(body)) { }
 
 // }}}
 
@@ -59,28 +62,13 @@ void Statement::add(ULit &&lit) {
 // {{{ definition of Statement::print
 
 void Statement::print(std::ostream &out) const {
-    if (type != StatementType::WEAKCONSTRAINT) {
-        if (type == StatementType::EXTERNAL) { out << "#external "; }
-        if (head) { out << *head; }
-        if (!body.empty()) {
-            out << (type == StatementType::EXTERNAL ? ":" : ":-");
-            auto f = [](std::ostream &out, UBodyAggr const &x) { out << *x; };
-            print_comma(out, body, ";", f);
-        }
-        out << ".";
-    }
-    else {
-        out << ":~";
-        print_comma(out, body, ";", [](std::ostream &out, UBodyAggr const &x) { out << *x; });
-        out << ".";
-        head->print(out);
-    }
+    head->printWithCondition(out, body);
 }
 
 // }}}
 // {{{ definition of Statement::isEDB
 
-Symbol Statement::isEDB() const { return type == StatementType::RULE && body.empty() ? head->isEDB() : Symbol(); }
+Symbol Statement::isEDB() const { return body.empty() ? head->isEDB() : Symbol(); }
 
 // }}}
 // {{{ definition of Statement::unpool
@@ -106,7 +94,7 @@ UStmVec Statement::unpool(bool beforeRewrite) {
     UStmVec x;
     for (auto &body : bodies) {
         for (auto &head : heads) {
-            x.emplace_back(make_locatable<Statement>(loc(), get_clone(head), get_clone(body), type));
+            x.emplace_back(make_locatable<Statement>(loc(), get_clone(head), get_clone(body)));
         }
     }
     return x;
@@ -121,9 +109,20 @@ bool Statement::hasPool(bool beforeRewrite) const {
 }
 
 // }}}
-// {{{ definition of Statement::rewrite1
+// {{{ definition of Statement::assignLevels
 
-bool Statement::rewrite1(Projections &project, Logger &log) {
+void Statement::assignLevels(VarTermBoundVec &bound) {
+    AssignLevel c;
+    head->assignLevels(c);
+    for (auto &y : body) { y->assignLevels(c); }
+    c.add(bound);
+    c.assignLevels();
+}
+
+// }}}
+// {{{ definition of Statement::simplify
+
+bool Statement::simplify(Projections &project, Logger &log) {
     SimplifyState state;
     if (!head->simplify(project, state, log)) { return false; }
     bool singleton = std::accumulate(body.begin(), body.end(), 0, [](unsigned x, UBodyAggr const &y){ return x + y->projectScore(); }) == 1 && head->isPredicate();
@@ -136,7 +135,7 @@ bool Statement::rewrite1(Projections &project, Logger &log) {
 }
 
 // }}}
-// {{{ definition of Statement::rewrite2
+// {{{ definition of Statement::rewrite
 
 namespace {
 
@@ -188,14 +187,14 @@ void _rewriteAssignments(UBodyAggrVec &body) {
     body.clear();
     dep.init(open);
     UBodyAggrVec sorted;
-    for (auto it = open.begin(); it != open.end(); ) {
+    for (std::size_t it = 0; it != open.size(); ) {
         LitDep::EntVec assign;
-        for (; it != open.end(); ++it) {
-            if (!(*it)->data->isAssignment()) {
-                dep.propagate(*it, open, &bound);
-                sorted.emplace_back(std::move((*it)->data));
+        for (; it != open.size(); ++it) {
+            if (!(open[it])->data->isAssignment()) {
+                dep.propagate(open[it], open, &bound);
+                sorted.emplace_back(std::move((open[it])->data));
             }
-            else { assign.emplace_back(*it); }
+            else { assign.emplace_back(open[it]); }
         }
         LitDep::EntVec nextAssign;
         while (!assign.empty()) {
@@ -231,25 +230,19 @@ void _rewriteAssignments(UBodyAggrVec &body) {
 
 } // namespace
 
-void Statement::rewrite2() {
+void Statement::rewrite() {
     AuxGen auxGen;
     { // rewrite aggregates
         Term::replace(head, head->rewriteAggregates(body));
         _rewriteAggregates(body);
     }
-    { // assign levels
-        AssignLevel c;
-        head->assignLevels(c);
-        for (auto &y : body) { y->assignLevels(c); }
-        c.assignLevels();
-    }
     { // rewrite arithmetics
         Term::ArithmeticsMap arith;
         Literal::AssignVec assign;
-        arith.emplace_back();
+        arith.emplace_back(gringo_make_unique<Term::LevelMap>());
         head->rewriteArithmetics(arith, auxGen);
         for (auto &y : body) { y->rewriteArithmetics(arith, assign, auxGen); }
-        for (auto &y : arith.back()) { body.emplace_back(gringo_make_unique<SimpleBodyLiteral>(RelationLiteral::make(y))); }
+        for (auto &y : *arith.back()) { body.emplace_back(gringo_make_unique<SimpleBodyLiteral>(RelationLiteral::make(y))); }
         for (auto &y : assign) { body.emplace_back(gringo_make_unique<SimpleBodyLiteral>(RelationLiteral::make(y))); }
         arith.pop_back();
     }
@@ -300,13 +293,7 @@ void toGround(CreateHead &&head, UBodyAggrVec const &body, ToGroundArg &x, Groun
 } // namespace
 
 void Statement::toGround(ToGroundArg &x, Ground::UStmVec &stms) const {
-    Ground::RuleType t = Ground::RuleType::Disjunctive;
-    switch (type) {
-        case StatementType::EXTERNAL:   { t = Ground::RuleType::External;   break; }
-        case StatementType::WEAKCONSTRAINT: // t is ignored later
-        case StatementType::RULE:       { t = Ground::RuleType::Disjunctive;     break; }
-    }
-    Gringo::Input::toGround(head->toGround(x, stms, t), body, x, stms);
+    Gringo::Input::toGround(head->toGround(x, stms), body, x, stms);
 }
 
 // }}}

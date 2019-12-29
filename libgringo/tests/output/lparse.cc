@@ -1,20 +1,24 @@
-// {{{ GPL License
+// {{{ MIT License
 
-// This file is part of gringo - a grounder for logic programs.
-// Copyright (C) 2013  Roland Kaminski
+// Copyright 2017 Roland Kaminski
 
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal in the Software without restriction, including without limitation the
+// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+// sell copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
 
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+// IN THE SOFTWARE.
 
 // }}}
 
@@ -25,6 +29,92 @@
 namespace Gringo { namespace Output { namespace Test {
 
 TEST_CASE("output-lparse", "[output]") {
+    SECTION("bug-disjunction-range") {
+        // positive
+        REQUIRE("([[p(1),p(2)],[q]],[])" == IO::to_string(solve("p(1..2); q.")));
+        REQUIRE("([[]],[-:1:3-11: info: operation undefined:\n  (#Range0/X)\n,-:1:3-11: info: operation undefined:\n  (#Range0/X)\n,-:1:3-11: info: operation undefined:\n  (#Range0/X)\n])" == IO::to_string(solve("p((0..2)/X); q :- X=0.")));
+        REQUIRE("([[]],[-:1:3-11: info: operation undefined:\n  (#Range0/0)\n])" == IO::to_string(solve("p((0..2)/0); q :- X=0.")));
+        REQUIRE("([[p(2),p(4)],[q]],[-:1:3-11: info: operation undefined:\n  (4/#Range0)\n])" == IO::to_string(solve("p(4/(0..2)); q.")));
+        // negation
+        REQUIRE("([[],[p(1),p(2),q],[p(1),q],[p(2),q]],[])" == IO::to_string(solve("not p(1..2); q. {p(1)}. {p(2)}.")));
+        REQUIRE("([[],[p(1)]],[-:1:7-15: info: operation undefined:\n  (#Range0/X)\n,-:1:7-15: info: operation undefined:\n  (#Range0/X)\n,-:1:7-15: info: operation undefined:\n  (#Range0/X)\n])" == IO::to_string(solve("not p((0..2)/X); q :- X=0. {p(1)}.")));
+        REQUIRE("([[]],[-:1:7-15: info: operation undefined:\n  (#Range0/0)\n])" == IO::to_string(solve("not p((0..2)/0); q :- X=0.")));
+        REQUIRE("([[],[p(2),p(4),q],[p(2),q],[p(4),q]],[-:1:7-15: info: operation undefined:\n  (4/#Range0)\n])" == IO::to_string(solve("not p(4/(0..2)); q. {p(4)}. {p(2)}.")));
+        // double negation
+        REQUIRE("([[p(1),p(2)],[p(1),q],[p(2),q],[q]],[])" == IO::to_string(solve("not not p(1..2); q. {p(1)}. {p(2)}.")));
+        REQUIRE("([[],[p(1)]],[-:1:11-19: info: operation undefined:\n  (#Range0/X)\n,-:1:11-19: info: operation undefined:\n  (#Range0/X)\n,-:1:11-19: info: operation undefined:\n  (#Range0/X)\n])" == IO::to_string(solve("not not p((0..2)/X); q :- X=0. {p(1)}.")));
+        REQUIRE("([[]],[-:1:11-19: info: operation undefined:\n  (#Range0/0)\n])" == IO::to_string(solve("not not p((0..2)/0); q :- X=0.")));
+        REQUIRE("([[p(2),p(4)],[p(2),q],[p(4),q],[q]],[-:1:11-19: info: operation undefined:\n  (4/#Range0)\n])" == IO::to_string(solve("not not p(4/(0..2)); q. {p(4)}. {p(2)}.")));
+
+        // positive
+        REQUIRE("([[p(1),p(2)],[q]],[])" == IO::to_string(solve("p(1..2):#true; q:#true.")));
+        REQUIRE("([[]],[-:1:3-11: info: operation undefined:\n  (#Range0/X)\n,-:1:3-11: info: operation undefined:\n  (#Range0/X)\n,-:1:3-11: info: operation undefined:\n  (#Range0/X)\n])" == IO::to_string(solve("p((0..2)/X); q :- X=0.")));
+        REQUIRE("([[]],[-:1:3-11: info: operation undefined:\n  (#Range0/0)\n])" == IO::to_string(solve("p((0..2)/0):#true; q:#true :- X=0.")));
+        REQUIRE("([[p(2),p(4)],[q]],[-:1:3-11: info: operation undefined:\n  (4/#Range0)\n])" == IO::to_string(solve("p(4/(0..2)):#true; q:#true.")));
+        // negation
+        REQUIRE("([[],[p(1),p(2),q],[p(1),q],[p(2),q]],[])" == IO::to_string(solve("not p(1..2):#true; q:#true. {p(1)}. {p(2)}.")));
+        REQUIRE("([[],[p(1)]],[-:1:7-15: info: operation undefined:\n  (#Range0/X)\n,-:1:7-15: info: operation undefined:\n  (#Range0/X)\n,-:1:7-15: info: operation undefined:\n  (#Range0/X)\n])" == IO::to_string(solve("not p((0..2)/X):#true; q:#true :- X=0. {p(1)}.")));
+        REQUIRE("([[]],[-:1:7-15: info: operation undefined:\n  (#Range0/0)\n])" == IO::to_string(solve("not p((0..2)/0):#true; q:#true :- X=0.")));
+        REQUIRE("([[],[p(2),p(4),q],[p(2),q],[p(4),q]],[-:1:7-15: info: operation undefined:\n  (4/#Range0)\n])" == IO::to_string(solve("not p(4/(0..2)):#true; q:#true. {p(4)}. {p(2)}.")));
+        // double negation
+        REQUIRE("([[p(1),p(2)],[p(1),q],[p(2),q],[q]],[])" == IO::to_string(solve("not not p(1..2):#true; q:#true. {p(1)}. {p(2)}.")));
+        REQUIRE("([[],[p(1)]],[-:1:11-19: info: operation undefined:\n  (#Range0/X)\n,-:1:11-19: info: operation undefined:\n  (#Range0/X)\n,-:1:11-19: info: operation undefined:\n  (#Range0/X)\n])" == IO::to_string(solve("not not p((0..2)/X):#true; q:#true :- X=0. {p(1)}.")));
+        REQUIRE("([[]],[-:1:11-19: info: operation undefined:\n  (#Range0/0)\n])" == IO::to_string(solve("not not p((0..2)/0):#true; q:#true :- X=0.")));
+        REQUIRE("([[p(2),p(4)],[p(2),q],[p(4),q],[q]],[-:1:11-19: info: operation undefined:\n  (4/#Range0)\n])" == IO::to_string(solve("not not p(4/(0..2)):#true; q:#true. {p(4)}. {p(2)}.")));
+    }
+    SECTION("bug-disjunction-pools") {
+        // positive
+        REQUIRE("([[p(1),p(2)],[q]],[])" == IO::to_string(solve("p(1;2); q.")));
+        REQUIRE("([[p(1),p(2)],[q]],[-:1:3-6: info: operation undefined:\n  (0/X)\n])" == IO::to_string(solve("p(0/X;1;2); q :- X=0.")));
+        REQUIRE("([[p(1),p(2)],[q]],[-:1:3-6: info: operation undefined:\n  (X/0)\n])" == IO::to_string(solve("p(X/0;1;2); q :- X=0.")));
+        REQUIRE("([[]],[-:1:3-6: info: operation undefined:\n  (0/X)\n])" == IO::to_string(solve("p(0/X); q :- X=0.")));
+        REQUIRE("([[]],[-:1:3-6: info: operation undefined:\n  (X/0)\n])" == IO::to_string(solve("p(X/0); q :- X=0.")));
+        // negation
+        REQUIRE("([[],[p(1),p(2),q],[p(1),q],[p(2),q]],[])" == IO::to_string(solve("not p(1;2); q. {p(1)}. {p(2)}.")));
+        REQUIRE("([[],[p(1),p(2),q],[p(1),q],[p(2),q]],[-:1:7-10: info: operation undefined:\n  (0/X)\n])" == IO::to_string(solve("not p(0/X;1;2); q :- X=0. {p(1)}. {p(2)}.")));
+        REQUIRE("([[],[p(1),p(2),q],[p(1),q],[p(2),q]],[-:1:7-10: info: operation undefined:\n  (X/0)\n])" == IO::to_string(solve("not p(X/0;1;2); q :- X=0. {p(1)}. {p(2)}.")));
+        REQUIRE("([[]],[-:1:5-11: info: atom does not occur in any rule head:\n  p((0/X))\n,-:1:7-10: info: operation undefined:\n  (0/X)\n])" == IO::to_string(solve("not p(0/X); q :- X=0.")));
+        REQUIRE("([[]],[-:1:7-10: info: operation undefined:\n  (X/0)\n])" == IO::to_string(solve("not p(X/0); q :- X=0.")));
+        // double negation
+        REQUIRE("([[p(1),p(2)],[p(1),q]],[])" == IO::to_string(solve("not not p(1;2); q. p(1). {p(2)}.")));
+        REQUIRE("([[p(1),p(2)],[p(1),q]],[-:1:11-14: info: operation undefined:\n  (0/X)\n])" == IO::to_string(solve("not not p(0/X;1;2); q :- X=0. p(1). {p(2)}.")));
+        REQUIRE("([[p(1),p(2)],[p(1),q]],[-:1:11-14: info: operation undefined:\n  (X/0)\n])" == IO::to_string(solve("not not p(X/0;1;2); q :- X=0. p(1). {p(2)}.")));
+        REQUIRE("([[]],[-:1:9-15: info: atom does not occur in any rule head:\n  p((0/X))\n,-:1:11-14: info: operation undefined:\n  (0/X)\n])" == IO::to_string(solve("not not p(0/X); q :- X=0.")));
+        REQUIRE("([[]],[-:1:11-14: info: operation undefined:\n  (X/0)\n])" == IO::to_string(solve("not not p(X/0); q :- X=0.")));
+
+        // positive
+        REQUIRE("([[p(1),p(2)],[q]],[])" == IO::to_string(solve("p(1;2):#true; q:#true.")));
+        REQUIRE("([[p(1),p(2)],[q]],[-:1:3-6: info: operation undefined:\n  (0/X)\n])" == IO::to_string(solve("p(0/X;1;2):#true; q:#true :- X=0.")));
+        REQUIRE("([[p(1),p(2)],[q]],[-:1:3-6: info: operation undefined:\n  (X/0)\n])" == IO::to_string(solve("p(X/0;1;2):#true; q:#true :- X=0.")));
+        REQUIRE("([[]],[-:1:3-6: info: operation undefined:\n  (0/X)\n])" == IO::to_string(solve("p(0/X):#true; q:#true :- X=0.")));
+        REQUIRE("([[]],[-:1:3-6: info: operation undefined:\n  (X/0)\n])" == IO::to_string(solve("p(X/0):#true; q:#true :- X=0.")));
+        // negation
+        REQUIRE("([[],[p(1),p(2),q],[p(1),q],[p(2),q]],[])" == IO::to_string(solve("not p(1;2):#true; q:#true. {p(1)}. {p(2)}.")));
+        REQUIRE("([[],[p(1),p(2),q],[p(1),q],[p(2),q]],[-:1:7-10: info: operation undefined:\n  (0/X)\n])" == IO::to_string(solve("not p(0/X;1;2):#true; q:#true :- X=0. {p(1)}. {p(2)}.")));
+        REQUIRE("([[],[p(1),p(2),q],[p(1),q],[p(2),q]],[-:1:7-10: info: operation undefined:\n  (X/0)\n])" == IO::to_string(solve("not p(X/0;1;2):#true; q:#true :- X=0. {p(1)}. {p(2)}.")));
+        REQUIRE("([[]],[-:1:5-11: info: atom does not occur in any rule head:\n  p((0/X))\n,-:1:7-10: info: operation undefined:\n  (0/X)\n])" == IO::to_string(solve("not p(0/X):#true; q:#true :- X=0.")));
+        REQUIRE("([[]],[-:1:7-10: info: operation undefined:\n  (X/0)\n])" == IO::to_string(solve("not p(X/0):#true; q:#true :- X=0.")));
+        // double negation
+        REQUIRE("([[p(1),p(2)],[p(1),q]],[])" == IO::to_string(solve("not not p(1;2):#true; q:#true. p(1). {p(2)}.")));
+        REQUIRE("([[p(1),p(2)],[p(1),q]],[-:1:11-14: info: operation undefined:\n  (0/X)\n])" == IO::to_string(solve("not not p(0/X;1;2):#true; q:#true :- X=0. p(1). {p(2)}.")));
+        REQUIRE("([[p(1),p(2)],[p(1),q]],[-:1:11-14: info: operation undefined:\n  (X/0)\n])" == IO::to_string(solve("not not p(X/0;1;2):#true; q:#true :- X=0. p(1). {p(2)}.")));
+        REQUIRE("([[]],[-:1:9-15: info: atom does not occur in any rule head:\n  p((0/X))\n,-:1:11-14: info: operation undefined:\n  (0/X)\n])" == IO::to_string(solve("not not p(0/X):#true; q:#true :- X=0.")));
+        REQUIRE("([[]],[-:1:11-14: info: operation undefined:\n  (X/0)\n])" == IO::to_string(solve("not not p(X/0):#true; q:#true :- X=0.")));
+    }
+    SECTION("bug-classify-conditional-literal") {
+        REQUIRE(
+            "([[p,p(1),p(2),q(1),q(2)],[p,p(1),q(1),q(2),r(2)],[p,p(2),q(1),q(2),r(1)]],[])" ==
+            IO::to_string(solve(
+                "q(1;2).\n"
+
+                "p(X) :- q(X); p(X) : r(X).\n"
+                "r(X) :- q(X); r(X) : p(X).\n"
+
+                "p :- p(X).\n"
+                "  :- not p.\n"
+            ))
+        );
+    }
     SECTION("bug-classical-negation") {
         REQUIRE(
             "([],[])" ==
@@ -105,7 +195,27 @@ TEST_CASE("output-lparse", "[output]") {
             ))
         );
     }
-
+    SECTION("rewrite-bug1") {
+        REQUIRE(
+            "([[p(1),p(2),q(1),q(2)],[p(1),q(1),q(2)],[p(2),q(1),q(2)],[q(1),q(2)]],[])" ==
+            IO::to_string(solve(
+                "q(1..2)."
+                "{ p(X) : q(X) } :- 2 { q(X) }."
+            ))
+        );
+    }
+    SECTION("rewrite-bug2") {
+        REQUIRE(
+            "([[x]],[-:1:19-25: info: atom does not occur in any rule head:\n"
+            "  p(#Arith0)\n"
+            ",-:1:21-24: info: operation undefined:\n"
+            "  (X+Y)\n"
+            "])" ==
+            IO::to_string(solve(
+                "x :- #count { 1 : p(X+Y) } >= 0, X=1, Y=a."
+            ))
+        );
+    }
     SECTION("recCondBug") {
         REQUIRE(
             "([[0,2,4,5,9],[0,2,5,9],[0,4,9],[0,9]],[])" ==
@@ -129,7 +239,7 @@ TEST_CASE("output-lparse", "[output]") {
                 "\n"
                 "holds(body_aggregate(left(#inf,less_equal),sump,body_aggregate_element_set(S),right(greater_equal,U)))\n"
                 "    :- body_aggregate(left(#inf,less_equal),sump,body_aggregate_element_set(S),right(greater_equal,U))\n"
-                "     ; #sum+ { W,T : body_aggregate_element_set(S,body_aggregate_element((W,T),conjunction(C))), holds(C) } >= U % TODO: if the holds is ommitted strange things appear to happen\n"
+                "     ; #sum+ { W,T : body_aggregate_element_set(S,body_aggregate_element((W,T),conjunction(C))), holds(C) } >= U % TODO: if the holds is omitted strange things appear to happen\n"
                 "     .\n"
                 "% NOTE: there are more body aggregates but this is enough to support --lparse-rewrite\n"
                 "\n"
@@ -884,6 +994,62 @@ TEST_CASE("output-lparse", "[output]") {
                 ":- col(Y), not #disjoint { X : $cell(X,Y) : row(X) }.\n"
                 ":- row(X), not #disjoint { Y : $cell(X,Y) : col(Y) }.\n"
                 ).first.size());
+        REQUIRE(
+            "([[d=7,e=5,m=1,n=6,o=0,r=8,s=9,y=2]],[])" ==
+            IO::to_string(solve(
+                "0 $<= $(s;e;n;d;m;o;r;y) $<= 9.\n"
+                "\n"
+                "                1000$*$s $+ 100$*$e $+ 10$*$n $+ $d\n"
+                "$+              1000$*$m $+ 100$*$o $+ 10$*$r $+ $e\n"
+                "$= 10000$*$m $+ 1000$*$o $+ 100$*$n $+ 10$*$e $+ $y.\n"
+                "\n"
+                "$m $!= 0.\n"
+                "$s $!= 0.\n"
+                "#disjoint { X:$X:X=(s;e;n;d;m;o;r;y) }.\n"
+                "\n"
+                "#show.\n"
+                "#show $(s;e;n;d;m;o;r;y).\n"
+                )));
+        REQUIRE(
+            "([[d=7,e=5,m=1,n=6,o=0,r=8,s=9,y=2]],[])" ==
+            IO::to_string(solve(
+                "0 $<= $(s;e;n;d;m;o;r;y) $<= 9.\n"
+                "0 $<= $(s0;s1;s2;s3) $<= 19.\n"
+                "0 $<= $(c0;c1;c2;c3) $<= 1.\n"
+                "\n"
+                "$s0 $= $d $+ $e.\n"
+                "$y  $= $s0     :- $s0 $<  10.\n"
+                "$y  $= $s0$-10 :- $s0 $>= 10.\n"
+                "$c0 $= 0       :- $s0 $<  10.\n"
+                "$c0 $= 1       :- $s0 $>= 10.\n"
+                "\n"
+                "$s1 $= $n $+ $r $+ $c0.\n"
+                "$e  $= $s1     :- $s1 $<  10.\n"
+                "$e  $= $s1$-10 :- $s1 $>= 10.\n"
+                "$c1 $= 0       :- $s1 $<  10.\n"
+                "$c1 $= 1       :- $s1 $>= 10.\n"
+                "\n"
+                "$s2 $= $e $+ $o $+ $c1.\n"
+                "$n  $= $s2     :- $s2 $<  10.\n"
+                "$n  $= $s2$-10 :- $s2 $>= 10.\n"
+                "$c2 $= 0       :- $s2 $<  10.\n"
+                "$c2 $= 1       :- $s2 $>= 10.\n"
+                "\n"
+                "$s3 $= $s $+ $m $+ $c2.\n"
+                "$o  $= $s3     :- $s3 $<  10.\n"
+                "$o  $= $s3$-10 :- $s3 $>= 10.\n"
+                "$c3 $= 0       :- $s3 $<  10.\n"
+                "$c3 $= 1       :- $s3 $>= 10.\n"
+                "\n"
+                "$m $= $c3.\n"
+                "\n"
+                "$m $!= 0.\n"
+                "$s $!= 0.\n"
+                "#disjoint { X:$X:X=(s;e;n;d;m;o;r;y) }.\n"
+                "\n"
+                "#show.\n"
+                "#show $(s;e;n;d;m;o;r;y).\n"
+                )));
     }
 
     SECTION("queens") {
@@ -1036,7 +1202,7 @@ TEST_CASE("output-lparse", "[output]") {
                 "a(1).\n"
                 "h :- { not a(X+1) : a(X) } < 2.\n")));
         REQUIRE(
-            "([[a(1),a(a),g(1)]],[-:3:30-31: info: operation undefined:\n  (1*X+1)\n,-:4:30-31: info: operation undefined:\n  (1*X+1)\n])" ==
+            "([[a(1),a(a),g(1)]],[-:4:30-31: info: operation undefined:\n  (1*X+1)\n,-:3:30-31: info: operation undefined:\n  (1*X+1)\n])" ==
             IO::to_string(solve(
                 "a(a).\n"
                 "a(1).\n"
@@ -1088,7 +1254,7 @@ TEST_CASE("output-lparse", "[output]") {
                 "a(a).\n"
                 "a(1).\n"
                 "X <= { p(X) } < X+1 :- a(X).\n", { "p(" })));
-		REQUIRE(
+        REQUIRE(
             "([[p(1)]],[-:3:1-2: info: operation undefined:\n  (1*X+-1)\n])" ==
             IO::to_string(solve(
                 "a(a).\n"
@@ -1136,10 +1302,7 @@ TEST_CASE("output-lparse", "[output]") {
     }
 
     SECTION("undefinedScript") {
-        REQUIRE(
-            "([[]],[-:1:3-13: info: operation undefined:\n  function 'failure' not found\n])" ==
-            IO::to_string(solve(
-                "a(@failure()).\n")));
+        REQUIRE_THROWS_AS(IO::to_string(solve("a(@failure()).\n")), std::runtime_error);
     }
 
     SECTION("minMax") {
@@ -1241,50 +1404,16 @@ TEST_CASE("output-lparse", "[output]") {
                 "{p(1..2)}.\n"
                 ":- #false:p(X).\n", {"p("})));
     }
-
+    SECTION("bugLargeCond") {
+        REQUIRE(
+            "([[],[a(a)],[a(b)]],[])" ==
+            IO::to_string(solve(
+                "{ a(a;b) }.\n"
+                "b(X) :- a(X).\n"
+                "c(X) :- a(X).\n"
+                ":- #count {A,B: a(A),  b(A),  c(A), a(B), b(B), c(B) } >= 2.\n", {"a("})));
+    }
 }
-
-#ifdef WITH_PYTHON
-
-TEST_CASE("output-lparse-python", "[output][python]") {
-    REQUIRE(
-        "([[p(39),q(\"a\"),q(1),q(2),q(a),r(2),r(3),s((1,2)),s((1,3)),s((2,1))]],[])" == IO::to_string(solve(
-            "#script (python)\n"
-            "import clingo\n"
-            "def conv(a): return a.number if hasattr(a, 'number') else a\n"
-            "def pygcd(a, b): return b if conv(a) == 0 else pygcd(conv(b) % conv(a), a)\n"
-            "def pytest():    return [1, 2, clingo.Function(\"a\"), \"a\"]\n"
-            "def pymatch():   return [(1,2),(1,3),(2,1)]\n"
-            "#end.\n"
-            "\n"
-            "p(@pygcd(2*3*7*13,3*11*13)).\n"
-            "q(@pytest()).\n"
-            "r(X) :- (1,X)=@pymatch().\n"
-            "s(X) :- X=@pymatch().\n"
-            )));
-}
-
-#endif // WITH_PYTHON
-
-#ifdef WITH_LUA
-
-TEST_CASE("output-lparse-lua", "[output][lua]") {
-    REQUIRE(
-        "([[p(39),q(\"a\"),q(1),q(2),q(a),r(2),r(3),s((1,2)),s((1,3)),s((2,1))]],[])" == IO::to_string(solve(
-            "#script (lua)\n"
-            "function conv(a) if type(a) == 'number' then return a else return a.number end end\n"
-            "function luagcd(a, b) if conv(a) == 0 then return b else return luagcd(conv(b) % conv(a), a) end end\n"
-            "function luatest()    return {1, 2, clingo.Function(\"a\"), \"a\"} end\n"
-            "function luamatch()   return {clingo.Tuple{1,2},clingo.Tuple{1,3},clingo.Tuple{2,1}} end\n"
-            "#end.\n"
-            "\n"
-            "p(@luagcd(2*3*7*13,3*11*13)).\n"
-            "q(@luatest()).\n"
-            "r(X) :- (1,X)=@luamatch().\n"
-            "s(X) :- X=@luamatch().\n"
-            )));
-}
-#endif // WITH_LUA
 
 } } } // namespace Test Output Gringo
 

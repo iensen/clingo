@@ -1,0 +1,1 @@
+/usr/bin/c++  -O3 -DNDEBUG  -rdynamic CMakeFiles/gringo.dir/main.cc.o  -o ../../bin/gringo -Wl,-rpath,/home/iensen/projects/clingo/bin: ../../lib/libpyclingo.a ../../bin/libclingo.so.3.0 -lpython2.7 

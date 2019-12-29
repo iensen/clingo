@@ -4,7 +4,14 @@
 
 namespace Clingo { namespace Test {
 
-using V = Variant<int, std::string, std::unique_ptr<int>>;
+using V = Variant<int, std::string>;
+using VU = Variant<int, std::string, std::unique_ptr<int>>;
+
+struct R;
+using VR = Variant<int, R>;
+struct R {
+    VR x;
+};
 
 struct D {
     D(std::string &r) : r(r) { r = "not called"; }
@@ -55,6 +62,11 @@ TEST_CASE("visitor", "[clingo]") {
     x = y;
     REQUIRE(x.get<std::string>() == "s1");
 
+    VR xr{R{1}};
+    REQUIRE(xr.get<R>().x.get<int>() == 1);
+    xr = std::move(xr.get<R>().x);
+    REQUIRE(xr.get<int>() == 1);
+
 #if (__clang__ || __GNUC__ >= 5)
     std::string r;
     y.accept(D(r));
@@ -63,12 +75,13 @@ TEST_CASE("visitor", "[clingo]") {
     REQUIRE(r == "s1");
     REQUIRE(x.accept(DA(), 3) == 5);
 
-    x = V::make<std::unique_ptr<int>>(nullptr);
-    REQUIRE(!x.get<std::unique_ptr<int>>());
+    auto xu = VU::make<std::unique_ptr<int>>(nullptr);
+    auto yu = VU::make<std::string>("s1");
+    REQUIRE(!xu.get<std::unique_ptr<int>>());
 
-    x.swap(y);
-    REQUIRE(!y.get<std::unique_ptr<int>>());
-    REQUIRE(x.get<std::string>() == "s1");
+    xu.swap(yu);
+    REQUIRE(!yu.get<std::unique_ptr<int>>());
+    REQUIRE(xu.get<std::string>() == "s1");
 #endif
 }
 

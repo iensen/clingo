@@ -49,43 +49,45 @@ class Controller:
         self.output.send("interrupt")
 
     def run(self):
-        print
-        print "this prompt accepts the following commands:"
-        print "  solve              - start solving"
-        print "  exit/EOF           - terminate the solver"
-        print "  Ctrl-C             - interrupt current search"
-        print "  less_pigeon_please - select an easy problem"
-        print "  more_pigeon_please - select a difficult problem"
-        print
+        print("")
+        print("this prompt accepts the following commands:")
+        print("  solve              - start solving")
+        print("  exit/EOF           - terminate the solver")
+        print("  Ctrl-C             - interrupt current search")
+        print("  less_pigeon_please - select an easy problem")
+        print("  more_pigeon_please - select a difficult problem")
+        print("")
 
         pyInt = signal.getsignal(signal.SIGINT)
         while True:
             signal.signal(signal.SIGINT, pyInt)
             try:
-                line = raw_input('> ')
+                try: input_ = raw_input
+                except NameError: input_ = input
+                line = input_('> ')
                 signal.signal(signal.SIGINT, signal.SIG_IGN)
             except EOFError:
                 signal.signal(signal.SIGINT, signal.SIG_IGN)
                 line = "exit"
-                print line
+                print(line)
             except KeyboardInterrupt:
                 signal.signal(signal.SIGINT, signal.SIG_IGN)
                 print
                 continue
             if line == "solve":
-                print "Solving..."
+                print("Solving...")
                 self.output.send("solve")
                 signal.signal(signal.SIGINT, self.interrupt)
                 # NOTE: we need a timeout to catch signals
-                msg = self.input.receive(float("inf"))
-                print msg
+                msg = self.input.receive(1000)
+                print(msg)
             elif line == "exit":
                 self.output.send("exit")
                 break
             elif line in ["less_pigeon_please", "more_pigeon_please"]:
                 self.output.send(line)
             else:
-                print "unknown command: " + line
+                print("unknown command: " + line)
 
 class SolveThread(Thread):
     STATE_SOLVE = 1
@@ -127,7 +129,7 @@ class SolveThread(Thread):
     def run(self):
         while True:
             if self.state == SolveThread.STATE_SOLVE:
-                f = self.prg.solve_async(on_model=self.on_model, on_finish=self.on_finish)
+                f = self.prg.solve(on_model=self.on_model, on_finish=self.on_finish, async_=True)
             msg = self.input.receive()
             if self.state == SolveThread.STATE_SOLVE:
                 f.cancel()

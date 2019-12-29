@@ -1,25 +1,30 @@
-// {{{ GPL License
+// {{{ MIT License
 
-// This file is part of gringo - a grounder for logic programs.
-// Copyright (C) 2013  Roland Kaminski
+// Copyright 2017 Roland Kaminski
 
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal in the Software without restriction, including without limitation the
+// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+// sell copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
 
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+// IN THE SOFTWARE.
 
 // }}}
 
 #include "gringo/output/theory.hh"
 #include "gringo/output/literal.hh"
+#include "gringo/backend.hh"
 #include "gringo/logger.hh"
 #include <cstring>
 
@@ -201,7 +206,7 @@ UTheoryTerm TheoryParser::parse(RawTheoryTerm::ElemVec &&elems, Logger &log) {
     for (auto &elem : elems) {
         for (auto &op : elem.first) {
             if (!def_.hasOp(op, unary)) {
-                GRINGO_REPORT(log, clingo_error_runtime)
+                GRINGO_REPORT(log, Warnings::RuntimeError)
                     << loc_ << ": error: missing definition for operator:" << "\n"
                     << "  " << op << "\n";
             }
@@ -235,7 +240,7 @@ RawTheoryTerm &RawTheoryTerm::operator=(RawTheoryTerm &&) = default;
 
 RawTheoryTerm::~RawTheoryTerm() noexcept = default;
 
-void RawTheoryTerm::append(FWStringVec &&ops, UTheoryTerm &&term) {
+void RawTheoryTerm::append(StringVec &&ops, UTheoryTerm &&term) {
     assert(elems_.empty() || !ops.empty());
     elems_.emplace_back(std::move(ops), std::move(term));
 }
@@ -314,7 +319,7 @@ UnaryTheoryTerm *UnaryTheoryTerm::clone() const {
 Potassco::Id_t UnaryTheoryTerm::eval(TheoryData &data, Logger &log) const {
     auto op = data.addTerm(op_.c_str());
     Potassco::Id_t args[] = { arg_->eval(data, log) };
-    return data.addTerm(op, Potassco::toSpan(args, 1));
+    return data.addTermFun(op, Potassco::toSpan(args, 1));
 }
 
 void UnaryTheoryTerm::collect(VarTermBoundVec &vars) {
@@ -360,7 +365,7 @@ BinaryTheoryTerm *BinaryTheoryTerm::clone() const {
 Potassco::Id_t BinaryTheoryTerm::eval(TheoryData &data, Logger &log) const {
     auto op = data.addTerm(op_.c_str());
     Potassco::Id_t args[] = { left_->eval(data, log), right_->eval(data, log) };
-    return data.addTerm(op, Potassco::toSpan(args, 2));
+    return data.addTermFun(op, Potassco::toSpan(args, 2));
 }
 
 void BinaryTheoryTerm::collect(VarTermBoundVec &vars) {
@@ -414,7 +419,7 @@ Potassco::Id_t TupleTheoryTerm::eval(TheoryData &data, Logger &log) const {
     for (auto &arg : args_) {
         args.emplace_back(arg->eval(data, log));
     }
-    return data.addTerm(type_, Potassco::toSpan(args));
+    return data.addTermTup(type_, Potassco::toSpan(args));
 }
 
 void TupleTheoryTerm::collect(VarTermBoundVec &vars) {
@@ -470,7 +475,7 @@ Potassco::Id_t FunctionTheoryTerm::eval(TheoryData &data, Logger &log) const {
     for (auto &arg : args_) {
         args.emplace_back(arg->eval(data, log));
     }
-    return data.addTerm(name, Potassco::toSpan(args));
+    return data.addTermFun(name, Potassco::toSpan(args));
 }
 
 void FunctionTheoryTerm::collect(VarTermBoundVec &vars) {
@@ -539,9 +544,55 @@ UTheoryTerm TermTheoryTerm::initTheory(TheoryParser &, Logger &) {
 
 TheoryData::TheoryData(Potassco::TheoryData &data)
 : data_(data)
+, aSeen_{0}
 { }
 
 TheoryData::~TheoryData() noexcept = default;
+
+void TheoryData::print(Potassco::Id_t termId, const Potassco::TheoryTerm& term) {
+    switch (term.type()) {
+        case Potassco::Theory_t::Number  : out_->theoryTerm(termId, term.number()); break;
+        case Potassco::Theory_t::Symbol  : out_->theoryTerm(termId, Potassco::toSpan(term.symbol())); break;
+        case Potassco::Theory_t::Compound: out_->theoryTerm(termId, term.compound(), term.terms()); break;
+    }
+}
+void TheoryData::print(const Potassco::TheoryAtom& a) {
+    if (a.guard()) { out_->theoryAtom(a.atom(), a.term(), a.elements(), *a.guard(), *a.rhs()); }
+    else           { out_->theoryAtom(a.atom(), a.term(), a.elements()); }
+}
+void TheoryData::visit(Potassco::TheoryData const &data, Potassco::Id_t termId, Potassco::TheoryTerm const &t) {
+    if (addSeen(tSeen_, termId)) { // only visit once
+        // visit any subterms then print
+        data.accept(t, *this);
+        print(termId, t);
+    }
+}
+void TheoryData::visit(Potassco::TheoryData const &data, Potassco::Id_t elemId, Potassco::TheoryElement const &e) {
+    if (addSeen(eSeen_, elemId)) { // only visit once
+        // visit terms then print element
+        data.accept(e, *this);
+        out_->theoryElement(elemId, e.terms(), getCondition(elemId));
+    }
+}
+void TheoryData::visit(Potassco::TheoryData const &data, Potassco::TheoryAtom const &a) {
+    // visit elements then print atom
+    data.accept(a, *this);
+    print(a);
+}
+
+bool TheoryData::addSeen(std::vector<bool>& vec, Potassco::Id_t id) const {
+    if (vec.size() <= id) { vec.resize(id + 1, false); }
+    bool seen = vec[id];
+    if (!seen) { vec[id] = true; }
+    return !seen;
+}
+
+void TheoryData::output(TheoryOutput &out) {
+    // NOTE: a friend class would probably have been nicer
+    out_ = &out;
+    for (auto it = data_.begin() + aSeen_; it != data_.end(); ++it) { visit(data_, **it); }
+    aSeen_ = data_.numAtoms();
+}
 
 template <typename ...Args>
 Potassco::Id_t TheoryData::addTerm_(Args ...args) {
@@ -565,11 +616,11 @@ Potassco::Id_t TheoryData::addTerm(char const *name) {
     return addTerm_(name);
 }
 
-Potassco::Id_t TheoryData::addTerm(Potassco::Id_t funcSym, Potassco::IdSpan const& terms) {
+Potassco::Id_t TheoryData::addTermFun(Potassco::Id_t funcSym, Potassco::IdSpan const& terms) {
     return addTerm_(funcSym, terms);
 }
 
-Potassco::Id_t TheoryData::addTerm(Potassco::Tuple_t type, Potassco::IdSpan const& terms) {
+Potassco::Id_t TheoryData::addTermTup(Potassco::Tuple_t type, Potassco::IdSpan const& terms) {
     return addTerm_(type, terms);
 }
 
@@ -581,7 +632,7 @@ Potassco::Id_t TheoryData::addTerm(Symbol value) {
                 auto f = addTerm("-");
                 auto ret = addTerm(-num);
                 Potassco::Id_t args[] = { ret };
-                return addTerm(f, Potassco::toSpan(args, 1));
+                return addTermFun(f, Potassco::toSpan(args, 1));
             }
             else {
                 return addTerm(num);
@@ -606,16 +657,16 @@ Potassco::Id_t TheoryData::addTerm(Symbol value) {
                 args.emplace_back(addTerm(arg));
             }
             if (value.name().empty()) {
-                return addTerm(Potassco::Tuple_t::Paren, Potassco::toSpan(args));
+                return addTermTup(Potassco::Tuple_t::Paren, Potassco::toSpan(args));
             }
             else {
                 Potassco::Id_t name = addTerm(value.name().c_str());
                 auto ret = args.empty()
                     ? addTerm(value.name().c_str())
-                    : addTerm(name, Potassco::toSpan(args));
+                    : addTermFun(name, Potassco::toSpan(args));
                 if (value.sign()) {
                     Potassco::Id_t f = addTerm("-");
-                    ret = addTerm(f, Potassco::toSpan(&ret, 1));
+                    ret = addTermFun(f, Potassco::toSpan(&ret, 1));
                 }
                 return ret;
             }
@@ -638,7 +689,7 @@ Potassco::Id_t TheoryData::addElem(Potassco::IdSpan const &tuple, LitVec &&cond)
     }, [&](Potassco::Id_t const &a, Potassco::Id_t const &b) {
         assert(a < size);
         return b == size ? elementEqual(data_.getElement(a), conditions_[a], tuple, cond) : a == b;
-    }, conditions_.size());
+    }, numeric_cast<unsigned>(conditions_.size()));
     if (ret.second) {
         data_.addElement(size, tuple, cond.empty() ? 0 : Potassco::TheoryData::COND_DEFERRED);
         conditions_.emplace_back(std::move(cond));
@@ -713,7 +764,7 @@ void TheoryData::printElem(std::ostream &out, Potassco::Id_t elemId, PrintLit pr
     }
     else if (!cond.empty()) {
         out << ": ";
-        print_comma(out, cond, ",", [this, &printLit](std::ostream &out, LiteralId const &lit){ printLit(out, lit); });
+        print_comma(out, cond, ",", [&printLit](std::ostream &out, LiteralId const &lit){ printLit(out, lit); });
     }
 }
 
@@ -740,6 +791,9 @@ void TheoryData::setCondition(Potassco::Id_t elementId, Potassco::Id_t newCond) 
 }
 
 void TheoryData::reset(bool resetData) {
+    aSeen_ = 0;
+    tSeen_.clear();
+    eSeen_.clear();
     TIdSet().swap(terms_);
     TIdSet().swap(elems_);
     AtomSet().swap(atoms_);

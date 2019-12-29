@@ -1,20 +1,24 @@
-// {{{ GPL License
+// {{{ MIT License
 
-// This file is part of gringo - a grounder for logic programs.
-// Copyright (C) 2013  Roland Kaminski
+// Copyright 2017 Roland Kaminski
 
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal in the Software without restriction, including without limitation the
+// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+// sell copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
 
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+// IN THE SOFTWARE.
 
 // }}}
 
@@ -24,7 +28,6 @@
 #include "gringo/output/output.hh"
 #include "input/nongroundgrammar/grammar.hh"
 #include "gringo/symbol.hh"
-#include "gringo/scripts.hh"
 
 #include "tests/tests.hh"
 
@@ -37,9 +40,10 @@ TEST_CASE("input-nongroundlexer", "[input]") {
     Output::OutputBase out(td, {}, oss);
     Program prg;
     Defines defs;
-    Scripts scripts(module);
-    NongroundProgramBuilder pb(scripts, prg, out, defs);
-    NonGroundParser ngp(pb);
+    Gringo::Test::TestContext context;
+    NongroundProgramBuilder pb(context, prg, out, defs);
+    bool incmode;
+    NonGroundParser ngp(pb, incmode);
     std::string in =
         "#script (python) #end "
         "%*xyz\nxyz\n*%"
@@ -55,6 +59,10 @@ TEST_CASE("input-nongroundlexer", "[input]") {
         "_xyz "
         "__xyz "
         "___xyz "
+        "'___xyz' "
+        "'___x'yz' "
+        "'___Xyz' "
+        "'___X'yz' "
         // TODO: check errors too: "# "
         ;
     ngp.pushStream("-", std::unique_ptr<std::istream>(new std::stringstream(in)), module.logger);
@@ -82,6 +90,15 @@ TEST_CASE("input-nongroundlexer", "[input]") {
     REQUIRE(String("___xyz") == String::fromRep(val.str));
     REQUIRE(5 == loc.beginLine);
     REQUIRE(23 == loc.beginColumn);
+    REQUIRE(int(NonGroundGrammar::parser::token::IDENTIFIER) == ngp.lex(&val, loc));
+    REQUIRE(String("'___xyz'") == String::fromRep(val.str));
+    REQUIRE(int(NonGroundGrammar::parser::token::IDENTIFIER) == ngp.lex(&val, loc));
+    REQUIRE(String("'___x'yz'") == String::fromRep(val.str));
+    REQUIRE(int(NonGroundGrammar::parser::token::VARIABLE) == ngp.lex(&val, loc));
+    REQUIRE(String("'___Xyz'") == String::fromRep(val.str));
+    REQUIRE(int(NonGroundGrammar::parser::token::VARIABLE) == ngp.lex(&val, loc));
+    REQUIRE(String("'___X'yz'") == String::fromRep(val.str));
+    REQUIRE(int(NonGroundGrammar::parser::token::SYNC) == ngp.lex(&val, loc));
     REQUIRE(0 == ngp.lex(&val, loc));
 }
 

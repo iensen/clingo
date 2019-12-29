@@ -1,20 +1,24 @@
-// {{{ GPL License
+// {{{ MIT License
 
-// This file is part of gringo - a grounder for logic programs.
-// Copyright (C) 2013  Roland Kaminski
+// Copyright 2017 Roland Kaminski
 
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal in the Software without restriction, including without limitation the
+// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+// sell copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
 
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+// IN THE SOFTWARE.
 
 // }}}
 
@@ -31,12 +35,16 @@
 /*!re2c
     re2c:cond:goto = "continue;";
 
-    NUMBER     = "0"|([1-9][0-9]*);
+    DEC        = "0"|([1-9][0-9]*);
+    HEX        = "0x"([0-9A-Fa-f]+);
+    OCT        = "0o"([1-7]+);
+    BIN        = "0b"([0-1]+);
+    NUMBER     = DEC | HEX | OCT | BIN;
     ANY        = [\000-\377];
     WS         = [\t\r ]*;
     NL         = "\n";
-    IDENTIFIER = "_"*[a-z]['A-Za-z0-9_]*;
-    VARIABLE   = "_"*[A-Z]['A-Za-z0-9_]*;
+    IDENTIFIER = [_']*[a-z]['A-Za-z0-9_]*;
+    VARIABLE   = [_']*[A-Z]['A-Za-z0-9_]*;
     ANONYMOUS  = "_";
     STRING     = "\"" ([^\\"\n]|"\\\""|"\\\\"|"\\n")* "\"";
     WSNL       = [\t\r\n ]*;
@@ -72,6 +80,7 @@ int Gringo::Input::NonGroundParser::lex_impl(void *pValue, Location &loc) {
         <normal> "#maximi"[zs]"e"             { return NonGroundGrammar::parser::token::MAXIMIZE; }
         <normal> "#program"                   { return NonGroundGrammar::parser::token::BLOCK; }
         <normal> "#external"                  { return NonGroundGrammar::parser::token::EXTERNAL; }
+        <normal> "#defined"                   { return NonGroundGrammar::parser::token::DEFINED; }
         <definition> "left"                   { return NonGroundGrammar::parser::token::LEFT; }
         <definition> "right"                  { return NonGroundGrammar::parser::token::RIGHT; }
         <definition> "head"                   { return NonGroundGrammar::parser::token::HEAD; }
@@ -82,6 +91,8 @@ int Gringo::Input::NonGroundParser::lex_impl(void *pValue, Location &loc) {
         <definition> "directive"              { return NonGroundGrammar::parser::token::DIRECTIVE; }
 
         <normal> "not"                        { value.str = String::toRep(not_); return NonGroundGrammar::parser::token::NOT; }
+        <normal> "default"                    { value.str = String::toRep(string()); return NonGroundGrammar::parser::token::DEFAULT; }
+        <normal> "override"                   { value.str = String::toRep(string()); return NonGroundGrammar::parser::token::OVERRIDE; }
         <normal> ANONYMOUS                    { return NonGroundGrammar::parser::token::ANONYMOUS; }
         <normal,theory,definition> IDENTIFIER { value.str = String::toRep(string()); return NonGroundGrammar::parser::token::IDENTIFIER; }
         <normal,theory,definition> NUMBER     { value.num = integer(); return NonGroundGrammar::parser::token::NUMBER; }
@@ -146,8 +157,8 @@ int Gringo::Input::NonGroundParser::lex_impl(void *pValue, Location &loc) {
         <normal,theory,definition> "%*"       => blockcomment { bc++; continue; }
         <normal,theory,definition> "%"        :=> comment
         <normal,theory,definition> "#!"       :=> comment
-        <normal,theory,definition> KEYWORD    { lexerError(string()); continue; }
-        <normal,theory,definition> ANY        { lexerError(string()); continue; }
+        <normal,theory,definition> KEYWORD    { lexerError(end(loc), string()); continue; }
+        <normal,theory,definition> ANY        { lexerError(end(loc), string()); continue; }
 
         <python> "#end" => normal {
             auto span = string();
@@ -158,7 +169,7 @@ int Gringo::Input::NonGroundParser::lex_impl(void *pValue, Location &loc) {
         }
         <python> NL {
             if(eof()) {
-                lexerError(Potassco::toSpan("<EOF>", 5));
+                lexerError(eof(loc), Potassco::toSpan("<EOF>", 5));
                 return 0;
             }
             step();
@@ -175,7 +186,7 @@ int Gringo::Input::NonGroundParser::lex_impl(void *pValue, Location &loc) {
         }
         <lua> NL {
             if(eof()) {
-                lexerError(Potassco::toSpan("<EOF>", 5));
+                lexerError(eof(loc), Potassco::toSpan("<EOF>", 5));
                 return 0;
             }
             step();
@@ -186,12 +197,12 @@ int Gringo::Input::NonGroundParser::lex_impl(void *pValue, Location &loc) {
         <blockcomment> "*%" { if(--bc == 0) { condition(yycnormal); start(loc); } continue; }
         <blockcomment> "%*" { bc++; continue; }
         <blockcomment> "%"  :=> comment
-        <blockcomment> NL   { if(eof()) { lexerError(Potassco::toSpan("<EOF>", 5)); return 0; } step(); continue; }
+        <blockcomment> NL   { if(eof()) { lexerError(eof(loc), Potassco::toSpan("<EOF>", 5)); return 0; } step(); continue; }
         <blockcomment> ANY  { continue; }
 
         <comment> NL {
             if(eof()) {
-                if(bc > 0) { lexerError(Potassco::toSpan("<EOF>", 5)); }
+                if(bc > 0) { lexerError(eof(loc), Potassco::toSpan("<EOF>", 5)); }
                 return 0;
             }
             step();

@@ -1,20 +1,24 @@
-// {{{ GPL License
+// {{{ MIT License
 
-// This file is part of gringo - a grounder for logic programs.
-// Copyright (C) 2013  Roland Kaminski
+// Copyright 2017 Roland Kaminski
 
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal in the Software without restriction, including without limitation the
+// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+// sell copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
 
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+// IN THE SOFTWARE.
 
 // }}}
 
@@ -22,7 +26,6 @@
 #include "gringo/input/programbuilder.hh"
 #include "gringo/input/program.hh"
 #include "gringo/output/output.hh"
-#include "gringo/scripts.hh"
 
 #include "tests/tests.hh"
 #include "tests/term_helper.hh"
@@ -39,19 +42,19 @@ namespace {
 struct Grounder {
     Grounder()
     : out(td, {}, oss)
-    , scripts(module)
-    , pb( scripts, p, out, d )
-    , ngp( pb )
+    , pb( context, p, out, d )
+    , ngp( pb, incmode )
     { }
     Gringo::Test::TestGringoModule module;
     Potassco::TheoryData td;
     std::ostringstream oss;
     Output::OutputBase out;
-    Scripts scripts;
+    Gringo::Test::TestContext context;
     Program p;
     Defines d;
     NongroundProgramBuilder pb;
     NonGroundParser ngp;
+    bool incmode;
 
 };
 
@@ -124,6 +127,8 @@ TEST_CASE("input-program", "[input]") {
         REQUIRE("#heuristic x[2@2,sign]:-[x]." == rewrite(parse("#heuristic x. [x@x,sign]#const x=2.")));
         REQUIRE("#heuristic p(2)[2@2,sign]:-[p(2)]." == rewrite(parse("#heuristic p(x). [x@x,sign]#const x=2.")));
         REQUIRE("#theory x{node{};&edge/1:node,{<<},node,head}.#false:-not &edge(2){(2),(Y): p(2,Y)}<<(2)." == rewrite(parse("#theory x{ node{}; &edge/1: node, {<<}, node, head }.&edge(z) { z, Y : p(z,Y)} << z. #const z=2.")));
+        REQUIRE("p(1)." ==  rewrite(parse(R"(#const a=1. [override] #const a=2. [default] p(a).)")));
+        REQUIRE("p(2)." ==  rewrite(parse(R"(#const a=1. #const a=2. [override] p(a).)")));
     }
 
     SECTION("check") {
@@ -199,6 +204,10 @@ TEST_CASE("input-program", "[input]") {
         REQUIRE("#heuristic a[1@2,sign]:-[a]." == rewrite(parse("#heuristic a. [1@2,sign]")));
         REQUIRE("#heuristic a[1@2,level]:-[a]." == rewrite(parse("#heuristic a. [1@2,level]")));
         REQUIRE("#heuristic a[1@0,level]:-[a];c." == rewrite(parse("#heuristic a : c. [1,level]")));
+        REQUIRE("#external p:[#inc_base].[false]" == rewrite(parse("#external p.")));
+        REQUIRE("#external p(X):[#inc_base].[false]#external p(Y):[#inc_base].[false]" == rewrite(parse("#external p(X;Y).")));
+        REQUIRE("#external p:[#inc_base].[X]#external p:[#inc_base].[Y]" == rewrite(parse("#external p. [(X;Y)]")));
+        REQUIRE("#external p(X):[#inc_base].[X]#external p(X):[#inc_base].[Y]#external p(Y):[#inc_base].[X]#external p(Y):[#inc_base].[Y]" == rewrite(parse("#external p(X;Y). [(X;Y)]")));
     }
 
     SECTION("theory") {

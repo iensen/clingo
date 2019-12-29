@@ -31,16 +31,16 @@
 // version 2.2 of Bison.
 
 /**
- ** \file build/release/libgringo/src/input/nongroundgrammar/grammar.hh
+ ** \file /home/iensen/projects/clingo/libgringo/src/input/nongroundgrammar/grammar.hh
  ** Define the Gringo::Input::NonGroundGrammar::parser class.
  */
 
 // C++ LALR(1) parser skeleton written by Akim Demaille.
 
-#ifndef YY_GRINGONONGROUNDGRAMMAR_BUILD_RELEASE_LIBGRINGO_SRC_INPUT_NONGROUNDGRAMMAR_GRAMMAR_HH_INCLUDED
-# define YY_GRINGONONGROUNDGRAMMAR_BUILD_RELEASE_LIBGRINGO_SRC_INPUT_NONGROUNDGRAMMAR_GRAMMAR_HH_INCLUDED
+#ifndef YY_GRINGONONGROUNDGRAMMAR_HOME_IENSEN_PROJECTS_CLINGO_LIBGRINGO_SRC_INPUT_NONGROUNDGRAMMAR_GRAMMAR_HH_INCLUDED
+# define YY_GRINGONONGROUNDGRAMMAR_HOME_IENSEN_PROJECTS_CLINGO_LIBGRINGO_SRC_INPUT_NONGROUNDGRAMMAR_GRAMMAR_HH_INCLUDED
 // //                    "%code requires" blocks.
-#line 42 "libgringo/src/input/nongroundgrammar.yy" // lalr1.cc:377
+#line 46 "/home/iensen/projects/clingo/libgringo/src/input/nongroundgrammar.yy" // lalr1.cc:377
 
     #include "gringo/input/programbuilder.hh"
     #include "potassco/basic_types.h"
@@ -52,7 +52,7 @@
     };
 
 
-#line 56 "build/release/libgringo/src/input/nongroundgrammar/grammar.hh" // lalr1.cc:377
+#line 56 "/home/iensen/projects/clingo/libgringo/src/input/nongroundgrammar/grammar.hh" // lalr1.cc:377
 
 
 # include <cstdlib> // std::abort
@@ -122,9 +122,9 @@
 # define YYDEBUG 0
 #endif
 
-#line 24 "libgringo/src/input/nongroundgrammar.yy" // lalr1.cc:377
+#line 28 "/home/iensen/projects/clingo/libgringo/src/input/nongroundgrammar.yy" // lalr1.cc:377
 namespace Gringo { namespace Input { namespace NonGroundGrammar {
-#line 128 "build/release/libgringo/src/input/nongroundgrammar/grammar.hh" // lalr1.cc:377
+#line 128 "/home/iensen/projects/clingo/libgringo/src/input/nongroundgrammar/grammar.hh" // lalr1.cc:377
 
 
 
@@ -138,7 +138,7 @@ namespace Gringo { namespace Input { namespace NonGroundGrammar {
     /// Symbol semantic values.
     union semantic_type
     {
-    #line 104 "libgringo/src/input/nongroundgrammar.yy" // lalr1.cc:377
+    #line 108 "/home/iensen/projects/clingo/libgringo/src/input/nongroundgrammar.yy" // lalr1.cc:377
 
     IdVecUid idlist;
     CSPLitUid csplit;
@@ -208,7 +208,7 @@ namespace Gringo { namespace Input { namespace NonGroundGrammar {
     TheoryDefVecUid theoryDefs;
     TheoryAtomType theoryAtomType;
 
-#line 212 "build/release/libgringo/src/input/nongroundgrammar/grammar.hh" // lalr1.cc:377
+#line 212 "/home/iensen/projects/clingo/libgringo/src/input/nongroundgrammar/grammar.hh" // lalr1.cc:377
     };
 #else
     typedef YYSTYPE semantic_type;
@@ -254,69 +254,73 @@ namespace Gringo { namespace Input { namespace NonGroundGrammar {
         DOT = 280,
         DOTS = 281,
         EXTERNAL = 282,
-        FALSE = 283,
-        FORGET = 284,
-        GEQ = 285,
-        GT = 286,
-        IF = 287,
-        INCLUDE = 288,
-        INFIMUM = 289,
-        LBRACE = 290,
-        LBRACK = 291,
-        LEQ = 292,
-        LPAREN = 293,
-        LT = 294,
-        MAX = 295,
-        MAXIMIZE = 296,
-        MIN = 297,
-        MINIMIZE = 298,
-        MOD = 299,
-        MUL = 300,
-        NEQ = 301,
-        POW = 302,
-        QUESTION = 303,
-        RBRACE = 304,
-        RBRACK = 305,
-        RPAREN = 306,
-        SEM = 307,
-        SHOW = 308,
-        EDGE = 309,
-        PROJECT = 310,
-        HEURISTIC = 311,
-        SHOWSIG = 312,
-        SLASH = 313,
-        SUB = 314,
-        SUM = 315,
-        SUMP = 316,
-        SUPREMUM = 317,
-        TRUE = 318,
-        BLOCK = 319,
-        UBNOT = 320,
-        UMINUS = 321,
-        VBAR = 322,
-        VOLATILE = 323,
-        WIF = 324,
-        XOR = 325,
-        PARSE_LP = 326,
-        PARSE_DEF = 327,
-        ANY = 328,
-        UNARY = 329,
-        BINARY = 330,
-        LEFT = 331,
-        RIGHT = 332,
-        HEAD = 333,
-        BODY = 334,
-        DIRECTIVE = 335,
-        THEORY = 336,
-        NUMBER = 337,
-        ANONYMOUS = 338,
-        IDENTIFIER = 339,
-        PYTHON = 340,
-        LUA = 341,
-        STRING = 342,
-        VARIABLE = 343,
-        THEORY_OP = 344,
-        NOT = 345
+        DEFINED = 283,
+        FALSE = 284,
+        FORGET = 285,
+        GEQ = 286,
+        GT = 287,
+        IF = 288,
+        INCLUDE = 289,
+        INFIMUM = 290,
+        LBRACE = 291,
+        LBRACK = 292,
+        LEQ = 293,
+        LPAREN = 294,
+        LT = 295,
+        MAX = 296,
+        MAXIMIZE = 297,
+        MIN = 298,
+        MINIMIZE = 299,
+        MOD = 300,
+        MUL = 301,
+        NEQ = 302,
+        POW = 303,
+        QUESTION = 304,
+        RBRACE = 305,
+        RBRACK = 306,
+        RPAREN = 307,
+        SEM = 308,
+        SHOW = 309,
+        EDGE = 310,
+        PROJECT = 311,
+        HEURISTIC = 312,
+        SHOWSIG = 313,
+        SLASH = 314,
+        SUB = 315,
+        SUM = 316,
+        SUMP = 317,
+        SUPREMUM = 318,
+        TRUE = 319,
+        BLOCK = 320,
+        UBNOT = 321,
+        UMINUS = 322,
+        VBAR = 323,
+        VOLATILE = 324,
+        WIF = 325,
+        XOR = 326,
+        PARSE_LP = 327,
+        PARSE_DEF = 328,
+        ANY = 329,
+        UNARY = 330,
+        BINARY = 331,
+        LEFT = 332,
+        RIGHT = 333,
+        HEAD = 334,
+        BODY = 335,
+        DIRECTIVE = 336,
+        THEORY = 337,
+        SYNC = 338,
+        NUMBER = 339,
+        ANONYMOUS = 340,
+        IDENTIFIER = 341,
+        PYTHON = 342,
+        LUA = 343,
+        STRING = 344,
+        VARIABLE = 345,
+        THEORY_OP = 346,
+        NOT = 347,
+        DEFAULT = 348,
+        OVERRIDE = 349
       };
     };
 
@@ -624,12 +628,12 @@ namespace Gringo { namespace Input { namespace NonGroundGrammar {
     enum
     {
       yyeof_ = 0,
-      yylast_ = 1992,     ///< Last index in yytable_.
-      yynnts_ = 84,  ///< Number of nonterminal symbols.
-      yyfinal_ = 8, ///< Termination state number.
+      yylast_ = 2356,     ///< Last index in yytable_.
+      yynnts_ = 83,  ///< Number of nonterminal symbols.
+      yyfinal_ = 10, ///< Termination state number.
       yyterror_ = 1,
       yyerrcode_ = 256,
-      yyntokens_ = 91  ///< Number of tokens.
+      yyntokens_ = 95  ///< Number of tokens.
     };
 
 
@@ -638,11 +642,11 @@ namespace Gringo { namespace Input { namespace NonGroundGrammar {
   };
 
 
-#line 24 "libgringo/src/input/nongroundgrammar.yy" // lalr1.cc:377
+#line 28 "/home/iensen/projects/clingo/libgringo/src/input/nongroundgrammar.yy" // lalr1.cc:377
 } } } // Gringo::Input::NonGroundGrammar
-#line 644 "build/release/libgringo/src/input/nongroundgrammar/grammar.hh" // lalr1.cc:377
+#line 648 "/home/iensen/projects/clingo/libgringo/src/input/nongroundgrammar/grammar.hh" // lalr1.cc:377
 
 
 
 
-#endif // !YY_GRINGONONGROUNDGRAMMAR_BUILD_RELEASE_LIBGRINGO_SRC_INPUT_NONGROUNDGRAMMAR_GRAMMAR_HH_INCLUDED
+#endif // !YY_GRINGONONGROUNDGRAMMAR_HOME_IENSEN_PROJECTS_CLINGO_LIBGRINGO_SRC_INPUT_NONGROUNDGRAMMAR_GRAMMAR_HH_INCLUDED

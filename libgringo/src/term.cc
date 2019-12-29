@@ -1,20 +1,24 @@
-// {{{ GPL License
+// {{{ MIT License
 
-// This file is part of gringo - a grounder for logic programs.
-// Copyright (C) 2013  Roland Kaminski
+// Copyright 2017 Roland Kaminski
 
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal in the Software without restriction, including without limitation the
+// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+// sell copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
 
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+// IN THE SOFTWARE.
 
 // }}}
 
@@ -40,7 +44,7 @@ void Defines::add(Location const &loc, String name, UTerm &&value, bool defaultD
     if (it == defs_.end())                           { defs_.emplace(name, make_tuple(defaultDef, loc, std::move(value))); }
     else if (std::get<0>(it->second) && !defaultDef) { it->second = make_tuple(defaultDef, loc, std::move(value)); }
     else if (std::get<0>(it->second) || !defaultDef) {
-        GRINGO_REPORT(log, clingo_error_runtime)
+        GRINGO_REPORT(log, Warnings::RuntimeError)
             << loc << ": error: redefinition of constant:\n"
             << "  #const " << name << "=" << *value << ".\n"
             << std::get<1>(it->second) << ": note: constant also defined here\n";
@@ -76,7 +80,7 @@ void Defines::init(Logger &log) {
                     << std::get<1>(x->data->second) << ": note: cycle involves definition:\n"
                     << "  #const " << x->data->first << "=" << *std::get<2>(x->data->second) << ".\n";
             }
-            GRINGO_REPORT(log, clingo_error_runtime) << msg.str();
+            GRINGO_REPORT(log, Warnings::RuntimeError) << msg.str();
         }
         for (auto &x : scc) { Term::replace(std::get<2>(x->data->second), std::get<2>(x->data->second)->replace(*this, true)); }
     }
@@ -89,7 +93,7 @@ void Defines::apply(Symbol x, Symbol &retVal, UTerm &retTerm, bool replace) {
         if (x.sig().arity() > 0) {
             SymVec args;
             bool changed = true;
-            for (unsigned i = 0, e = x.args().size; i != e; ++i) {
+            for (std::size_t i = 0, e = x.args().size; i != e; ++i) {
                 UTerm rt;
                 args.emplace_back();
                 apply(x.args()[i], args.back(), rt, true);
@@ -243,7 +247,7 @@ void GFunctionTerm::print(std::ostream &out) const {
     out << ")";
 }
 
-Sig GFunctionTerm::sig() const { return Sig(name, args.size(), sign); }
+Sig GFunctionTerm::sig() const { return Sig(name, numeric_cast<uint32_t>(args.size()), sign); }
 
 GTerm::EvalResult GFunctionTerm::eval() const { return EvalResult(false, Symbol()); }
 
@@ -459,7 +463,10 @@ int eval(BinOp op, int x, int y) {
         case BinOp::ADD: { return x + y; }
         case BinOp::SUB: { return x - y; }
         case BinOp::MUL: { return x * y; }
-        case BinOp::MOD: { return x % y; }
+        case BinOp::MOD: {
+            assert(y != 0 && "must be checked before call");
+            return x % y;
+        }
         case BinOp::POW: { return ipow(x, y); }
         case BinOp::DIV: {
             assert(y != 0 && "must be checked before call");
@@ -471,15 +478,19 @@ int eval(BinOp op, int x, int y) {
 }
 
 int Term::toNum(bool &undefined, Logger &log) {
-    Symbol y(eval(undefined, log));
-    if (y.type() == SymbolType::Num) { return y.num(); }
-    else {
-        undefined = true;
-        GRINGO_REPORT(log, clingo_warning_operation_undefined)
+    bool undefined_arg = false;
+    Symbol y(eval(undefined_arg, log));
+    if (y.type() == SymbolType::Num) {
+        undefined = undefined || undefined_arg;
+        return y.num();
+    }
+    else if (!undefined_arg) {
+        GRINGO_REPORT(log, Warnings::OperationUndefined)
             << loc() << ": info: number expected:\n"
             << "  " << *this << "\n";
-        return 0;
     }
+    undefined = true;
+    return 0;
 }
 
 std::ostream &operator<<(std::ostream &out, BinOp op) {
@@ -541,7 +552,7 @@ void Term::collect(VarTermSet &x) const {
 
 
 bool Term::isZero(Logger &log) const {
-    bool undefined;
+    bool undefined = false;
     return getInvertibility() == Term::CONSTANT && eval(undefined, log) == Symbol::createNum(0);
 }
 
@@ -557,11 +568,11 @@ bool Term::bind(VarSet &bound) {
 
 UTerm Term::insert(ArithmeticsMap &arith, AuxGen &auxGen, UTerm &&term, bool eq) {
     unsigned level = term->getLevel();
-    assert(level < arith.size());
-    auto ret = arith[level].emplace(std::move(term), nullptr);
+    if (arith[level]->find(term) == arith[level]->end()) { level = numeric_cast<unsigned>(arith.size() - 1); }
+    auto ret = arith[level]->emplace(std::move(term), nullptr);
     if (ret.second) { ret.first->second = auxGen.uniqueVar(ret.first->first->loc(), level, "#Arith"); }
     if (eq) {
-        auto ret2 = arith[level].emplace(get_clone(ret.first->second), nullptr);
+        auto ret2 = arith[level]->emplace(get_clone(ret.first->second), nullptr);
         if (ret2.second) { ret2.first->second = get_clone(ret.first->first); }
     }
     return get_clone(ret.first->second);
@@ -580,12 +591,12 @@ UTerm AuxGen::uniqueVar(Location const &loc, unsigned level, const char *prefix)
 // {{{1 definition of SimplifyState
 
 std::unique_ptr<LinearTerm> SimplifyState::createScript(Location const &loc, String name, UTermVec &&args) {
-    scripts.emplace_back(gen.uniqueVar(loc, 0, "#Script"), name, std::move(args));
+    scripts.emplace_back(gen.uniqueVar(loc, level, "#Script"), name, std::move(args));
     return make_locatable<LinearTerm>(loc, static_cast<VarTerm&>(*std::get<0>(scripts.back())), 1, 0);
 }
 
 std::unique_ptr<LinearTerm> SimplifyState::createDots(Location const &loc, UTerm &&left, UTerm &&right) {
-    dots.emplace_back(gen.uniqueVar(loc, 0, "#Range"), std::move(left), std::move(right));
+    dots.emplace_back(gen.uniqueVar(loc, level, "#Range"), std::move(left), std::move(right));
     return make_locatable<LinearTerm>(loc, static_cast<VarTerm&>(*std::get<0>(dots.back())), 1, 0);
 }
 
@@ -888,7 +899,7 @@ ValTerm::~ValTerm() { }
 
 VarTerm::VarTerm(String name, SVal ref, unsigned level, bool bindRef)
     : name(name)
-    , ref(ref)
+    , ref(name == "_" ? std::make_shared<Symbol>() : ref)
     , bindRef(bindRef)
     , level(level) { assert(ref || name == "_"); }
 
@@ -913,7 +924,6 @@ void VarTerm::print(std::ostream &out) const { out << name; }
 
 Term::SimplifyRet VarTerm::simplify(SimplifyState &state, bool positional, bool arithmetic, Logger &) {
     if (name == "_") {
-        ref = std::make_shared<Symbol>();
         if (positional) { return {*this, true}; }
         else { name = state.gen.uniqueName("#Anon"); }
     }
@@ -964,10 +974,13 @@ UTerm VarTerm::rewriteArithmetics(Term::ArithmeticsMap &, AuxGen &, bool) { retu
 
 bool VarTerm::operator==(Term const &x) const {
     auto t = dynamic_cast<VarTerm const*>(&x);
-    return t && name == t->name && level == t->level;
+    return t && name == t->name && level == t->level && (name != "_" || t == this);
 }
 
 size_t VarTerm::hash() const {
+    // NOTE: in principle ref and level could be used as identity
+    //       if not for the way gterms are constructed
+    //       which create arbitrary references
     return get_value_hash(typeid(VarTerm).hash_code(), name, level);
 }
 
@@ -983,7 +996,7 @@ UTerm VarTerm::renameVars(RenameMap &names) const {
         ret.first->second.first  = ((bindRef ? "X" : "Y") + std::to_string(names.size() - 1)).c_str();
         ret.first->second.second = std::make_shared<Symbol>();
     }
-    return make_locatable<VarTerm>(loc(), ret.first->second.first, ret.first->second.second, 0, bindRef);
+    return make_locatable<VarTerm>(loc(), ret.first->second.first, ret.first->second.second, level, bindRef);
 }
 
 UGTerm VarTerm::gterm(RenameMap &names, ReferenceMap &refs) const { return gringo_make_unique<GVarTerm>(_newRef(names, refs)); }
@@ -1053,15 +1066,19 @@ Term::ProjectRet LinearTerm::project(bool rename, AuxGen &auxGen) {
 }
 
 Symbol LinearTerm::eval(bool &undefined, Logger &log) const {
-    Symbol value = var->eval(undefined, log);
-    if (value.type() == SymbolType::Num) { return Symbol::createNum(m * value.num() + n); }
-    else {
-        undefined = true;
-        GRINGO_REPORT(log, clingo_warning_operation_undefined)
+    bool undefined_arg = false;
+    Symbol value = var->eval(undefined_arg, log);
+    if (value.type() == SymbolType::Num) {
+        undefined = undefined || undefined_arg;
+        return Symbol::createNum(m * value.num() + n);
+    }
+    else if (!undefined_arg) {
+        GRINGO_REPORT(log, Warnings::OperationUndefined)
             << loc() << ": info: operation undefined:\n"
             << "  " << *this << "\n";
-        return Symbol::createNum(0);
     }
+    undefined = true;
+    return Symbol::createNum(0);
 }
 
 bool LinearTerm::match(Symbol const &x) const {
@@ -1160,7 +1177,8 @@ Term::SimplifyRet UnOpTerm::simplify(SimplifyState &state, bool, bool arithmetic
         return {};
     }
     else if ((multiNeg && ret.notNumeric() && ret.notFunction()) || (!multiNeg && ret.notNumeric())) {
-        GRINGO_REPORT(log, clingo_warning_operation_undefined)
+        ret.update(arg);
+        GRINGO_REPORT(log, Warnings::OperationUndefined)
             << loc() << ": info: operation undefined:\n"
             << "  " << *this << "\n";
         return {};
@@ -1205,8 +1223,10 @@ void UnOpTerm::collect(VarSet &vars, unsigned minLevel , unsigned maxLevel) cons
     arg->collect(vars, minLevel, maxLevel);
 }
 Symbol UnOpTerm::eval(bool &undefined, Logger &log) const {
-    Symbol value = arg->eval(undefined, log);
+    bool undefined_arg = false;
+    Symbol value = arg->eval(undefined_arg, log);
     if (value.type() == SymbolType::Num) {
+        undefined = undefined || undefined_arg;
         int num = value.num();
         switch (op) {
             case UnOp::NEG: { return Symbol::createNum(-num); }
@@ -1217,15 +1237,16 @@ Symbol UnOpTerm::eval(bool &undefined, Logger &log) const {
         return Symbol::createNum(0);
     }
     else if (op == UnOp::NEG && value.type() == SymbolType::Fun) {
+        undefined = undefined || undefined_arg;
         return value.flipSign();
     }
-    else {
-        undefined = true;
-        GRINGO_REPORT(log, clingo_warning_operation_undefined)
+    else if (!undefined_arg) {
+        GRINGO_REPORT(log, Warnings::OperationUndefined)
             << loc() << ": info: operation undefined:\n"
             << "  " << *this << "\n";
-        return Symbol::createNum(0);
     }
+    undefined = true;
+    return Symbol::createNum(0);
 }
 bool UnOpTerm::match(Symbol const &x) const  {
     if (op != UnOp::NEG) {
@@ -1336,8 +1357,9 @@ Term::SimplifyRet BinOpTerm::simplify(SimplifyState &state, bool, bool, Logger &
     if (retLeft.undefined() || retRight.undefined()) {
         return {};
     }
-    else if (retLeft.notNumeric() || retRight.notNumeric() || (op == BinOp::DIV && retRight.isZero())) {
-        GRINGO_REPORT(log, clingo_warning_operation_undefined)
+    else if (retLeft.notNumeric() || retRight.notNumeric() || ((op == BinOp::DIV || op == BinOp::MOD) && retRight.isZero())) {
+        retLeft.update(left); retRight.update(right);
+        GRINGO_REPORT(log, Warnings::OperationUndefined)
             << loc() << ": info: operation undefined:\n"
             << "  " << *this << "\n";
         return {};
@@ -1346,7 +1368,15 @@ Term::SimplifyRet BinOpTerm::simplify(SimplifyState &state, bool, bool, Logger &
         // NOTE: keep binary operation untouched
     }
     else if (retLeft.type == SimplifyRet::CONSTANT && retRight.type == SimplifyRet::CONSTANT) {
-        return {Symbol::createNum(Gringo::eval(op, retLeft.val.num(), retRight.val.num()))};
+        auto left  = retLeft.val.num();
+        auto right = retRight.val.num();
+        if (op == BinOp::POW && left == 0 && right < 0) {
+            GRINGO_REPORT(log, Warnings::OperationUndefined)
+                << loc() << ": info: operation undefined:\n"
+                << "  " << *this << "\n";
+            return {};
+        }
+        return {Symbol::createNum(Gringo::eval(op, left, right))};
     }
     else if (retLeft.type == SimplifyRet::CONSTANT && retRight.type == SimplifyRet::LINEAR) {
         if (op == BinOp::ADD) {
@@ -1408,16 +1438,25 @@ void BinOpTerm::collect(VarSet &vars, unsigned minLevel , unsigned maxLevel) con
 }
 
 Symbol BinOpTerm::eval(bool &undefined, Logger &log) const {
-    Symbol l(left->eval(undefined, log));
-    Symbol r(right->eval(undefined, log));
-    if (l.type() == SymbolType::Num && r.type() == SymbolType::Num && (op != BinOp::DIV || r.num() != 0)) { return Symbol::createNum(Gringo::eval(op, l.num(), r.num())); }
-    else {
-        undefined = true;
-        GRINGO_REPORT(log, clingo_warning_operation_undefined)
+    bool undefined_arg = false;
+    Symbol l(left->eval(undefined_arg, log));
+    Symbol r(right->eval(undefined_arg, log));
+    bool defined =
+        l.type() == SymbolType::Num &&
+        r.type() == SymbolType::Num &&
+        ((op != BinOp::DIV && op != BinOp::MOD) || r.num() != 0) &&
+        (op != BinOp::POW || l.num() != 0 || r.num() >= 0);
+    if (defined) {
+        undefined = undefined || undefined_arg;
+        return Symbol::createNum(Gringo::eval(op, l.num(), r.num()));
+    }
+    else if (!undefined_arg) {
+        GRINGO_REPORT(log, Warnings::OperationUndefined)
             << loc() << ": info: operation undefined:\n"
             << "  " << *this << "\n";
-        return Symbol::createNum(0);
     }
+    undefined = true;
+    return Symbol::createNum(0);
 }
 
 bool BinOpTerm::match(Symbol const &) const { throw std::logic_error("Term::rewriteArithmetics must be called before Term::match"); }
@@ -1674,7 +1713,7 @@ LuaTerm *LuaTerm::clone() const {
     return make_locatable<LuaTerm>(loc(), name, get_clone(args)).release();
 }
 
-Sig LuaTerm::getSig() const { return Sig(name, args.size(), false); }
+Sig LuaTerm::getSig() const { return Sig(name, numeric_cast<uint32_t>(args.size()), false); }
 
 UTerm LuaTerm::renameVars(RenameMap &names) const {
     UTermVec args;
@@ -1750,10 +1789,10 @@ Term::SimplifyRet FunctionTerm::simplify(SimplifyState &state, bool positional, 
         ret.update(arg);
     }
     if (constant) {
-        bool undefined;
+        bool undefined = false;
         return {eval(undefined, log)};
     }
-    else          { return {*this, projected}; }
+    else { return {*this, projected}; }
 }
 
 Term::ProjectRet FunctionTerm::project(bool rename, AuxGen &auxGen) {
@@ -1836,7 +1875,7 @@ FunctionTerm *FunctionTerm::clone() const {
     return make_locatable<FunctionTerm>(loc(), name, get_clone(args)).release();
 }
 
-Sig FunctionTerm::getSig() const { return Sig(name, args.size(), false); }
+Sig FunctionTerm::getSig() const { return Sig(name, numeric_cast<uint32_t>(args.size()), false); }
 
 UTerm FunctionTerm::renameVars(RenameMap &names) const {
     UTermVec args;

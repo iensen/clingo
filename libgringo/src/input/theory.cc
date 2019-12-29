@@ -1,20 +1,24 @@
-// {{{ GPL License
+// {{{ MIT License
 
-// This file is part of gringo - a grounder for logic programs.
-// Copyright (C) 2013  Roland Kaminski
+// Copyright 2017 Roland Kaminski
 
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal in the Software without restriction, including without limitation the
+// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+// sell copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
 
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+// IN THE SOFTWARE.
 
 // }}}
 
@@ -131,9 +135,9 @@ bool TheoryElement::simplify(Projections &project, SimplifyState &state, Logger 
 
 void TheoryElement::rewriteArithmetics(Term::ArithmeticsMap &arith, AuxGen &auxGen) {
     Literal::AssignVec assign;
-    arith.emplace_back();
+    arith.emplace_back(gringo_make_unique<Term::LevelMap>());
     for (auto &lit : cond_) { lit->rewriteArithmetics(arith, assign, auxGen); }
-    for (auto &y : arith.back()) { cond_.emplace_back(RelationLiteral::make(y)); }
+    for (auto &y : *arith.back()) { cond_.emplace_back(RelationLiteral::make(y)); }
     for (auto &y : assign) { cond_.emplace_back(RelationLiteral::make(y)); }
     arith.pop_back();
 }
@@ -290,13 +294,13 @@ void TheoryAtom::initTheory(Location const &loc, TheoryDefs &defs, bool inBody, 
             type_ = atomDef->type();
             if (inBody) {
                 if (type_ == TheoryAtomType::Head) {
-                    GRINGO_REPORT(log, clingo_error_runtime)
+                    GRINGO_REPORT(log, Warnings::RuntimeError)
                         << loc << ": error: theory body atom used in head:" << "\n"
                         << "  " << sig << "\n";
                     return;
                 }
                 else if (type_ == TheoryAtomType::Directive) {
-                    GRINGO_REPORT(log, clingo_error_runtime)
+                    GRINGO_REPORT(log, Warnings::RuntimeError)
                         << loc << ": error: theory directive used in body:" << "\n"
                         << "  " << sig << "\n";
                     return;
@@ -304,13 +308,13 @@ void TheoryAtom::initTheory(Location const &loc, TheoryDefs &defs, bool inBody, 
             }
             else {
                 if (type_ == TheoryAtomType::Body) {
-                    GRINGO_REPORT(log, clingo_error_runtime)
+                    GRINGO_REPORT(log, Warnings::RuntimeError)
                         << loc << ": error: theory head atom used in body:" << "\n"
                         << "  " << sig << "\n";
                     return;
                 }
                 if (type_ == TheoryAtomType::Directive && hasBody) {
-                    GRINGO_REPORT(log, clingo_error_runtime)
+                    GRINGO_REPORT(log, Warnings::RuntimeError)
                         << loc << ": error: theory directive used with body:" << "\n"
                         << "  " << sig << "\n";
                     return;
@@ -329,13 +333,13 @@ void TheoryAtom::initTheory(Location const &loc, TheoryDefs &defs, bool inBody, 
                 }
             }
             else {
-                GRINGO_REPORT(log, clingo_error_runtime)
+                GRINGO_REPORT(log, Warnings::RuntimeError)
                     << loc << ": error: missing definition for term:" << "\n"
                     << "  " << atomDef->elemDef() << "\n";
             }
             if (hasGuard()) {
                 if (!atomDef->hasGuard()) {
-                    GRINGO_REPORT(log, clingo_error_runtime)
+                    GRINGO_REPORT(log, Warnings::RuntimeError)
                         << loc << ": error: unexpected guard:" << "\n"
                         << "  " << sig << "\n";
                 }
@@ -347,7 +351,7 @@ void TheoryAtom::initTheory(Location const &loc, TheoryDefs &defs, bool inBody, 
                     else {
                         std::stringstream ss;
                         print_comma(ss, atomDef->ops(), ",");
-                        GRINGO_REPORT(log, clingo_error_runtime)
+                        GRINGO_REPORT(log, Warnings::RuntimeError)
                             << loc << ": error: unexpected operator:" << "\n"
                             << "  " << op_ << "\n"
                             << loc << ": note: expected one of:\n"
@@ -355,7 +359,7 @@ void TheoryAtom::initTheory(Location const &loc, TheoryDefs &defs, bool inBody, 
                     }
                 }
                 else {
-                    GRINGO_REPORT(log, clingo_error_runtime)
+                    GRINGO_REPORT(log, Warnings::RuntimeError)
                         << loc << ": error: missing definition for term:" << "\n"
                         << "  " << atomDef->guardDef() << "\n";
                 }
@@ -363,7 +367,7 @@ void TheoryAtom::initTheory(Location const &loc, TheoryDefs &defs, bool inBody, 
             return;
         }
     }
-    GRINGO_REPORT(log, clingo_error_runtime)
+    GRINGO_REPORT(log, Warnings::RuntimeError)
         << loc << ": error: no definition found for theory atom:" << "\n"
         << "  " << sig << "\n";
 }
@@ -389,20 +393,20 @@ CreateBody TheoryAtom::toGroundBody(ToGroundArg &x, Ground::UStmVec &stms, NAF n
     }
     auto &completeRef = static_cast<Ground::TheoryComplete&>(*stms.back());
     CreateStmVec split;
-    split.emplace_back([&completeRef, this](Ground::ULitVec &&lits) -> Ground::UStm {
+    split.emplace_back([&completeRef](Ground::ULitVec &&lits) -> Ground::UStm {
         auto ret = gringo_make_unique<Ground::TheoryAccumulate>(completeRef, std::move(lits));
         completeRef.addAccuDom(*ret);
         return std::move(ret);
     });
     for (auto &y : elems_) {
-        split.emplace_back([this,&completeRef,&y,&x](Ground::ULitVec &&lits) -> Ground::UStm {
+        split.emplace_back([&completeRef,&y,&x](Ground::ULitVec &&lits) -> Ground::UStm {
             auto ret = y.toGround(x, completeRef, std::move(lits));
             completeRef.addAccuDom(*ret);
             return std::move(ret);
         });
     }
     bool aux1 = type_ != TheoryAtomType::Body;
-    return CreateBody([this, &completeRef, naf, aux1](Ground::ULitVec &lits, bool primary, bool aux2) {
+    return CreateBody([&completeRef, naf, aux1](Ground::ULitVec &lits, bool primary, bool aux2) {
         if (primary) {
             auto ret = gringo_make_unique<Ground::TheoryLiteral>(completeRef, naf, aux1 || aux2);
             lits.emplace_back(std::move(ret));
@@ -421,7 +425,7 @@ HeadTheoryLiteral::HeadTheoryLiteral(TheoryAtom &&atom, bool rewritten)
 
 HeadTheoryLiteral::~HeadTheoryLiteral() noexcept = default;
 
-CreateHead HeadTheoryLiteral::toGround(ToGroundArg &, Ground::UStmVec &, Ground::RuleType) const {
+CreateHead HeadTheoryLiteral::toGround(ToGroundArg &, Ground::UStmVec &) const {
     return atom_.toGroundHead();
 }
 

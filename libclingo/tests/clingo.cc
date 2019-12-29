@@ -1,27 +1,35 @@
-// {{{ GPL License
+// {{{ MIT License
 
-// This file is part of gringo - a grounder for logic programs.
-// Copyright Roland Kaminski
+// Copyright 2017 Roland Kaminski
 
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal in the Software without restriction, including without limitation the
+// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+// sell copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
 
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+// IN THE SOFTWARE.
 
 // }}}
 
 #include "tests.hh"
 #include <iostream>
 #include <fstream>
-
+#include <sstream>
+#include <iterator>
+#ifdef _MSC_VER
+#pragma warning (disable : 4996) // 'tmpnam': may be unsafe.
+#endif
 namespace Clingo { namespace Test {
 
 TEST_CASE("parse_term", "[clingo]") {
@@ -96,18 +104,18 @@ TEST_CASE("solving", "[clingo]") {
                     ctl.load(t.file);
                 }
                 ctl.ground({{"base", {}}});
-                REQUIRE(ctl.solve(MCB(models)).is_satisfiable());
+                REQUIRE(test_solve(ctl.solve(), models).is_satisfiable());
                 REQUIRE(models == ModelVec({{},{Id("a")}}));
                 REQUIRE(messages.empty());
             }
         }
-        SECTION("statistics") {
+        SECTION("get_statistics") {
             ctl.add("pigeon", {"p", "h"}, "1 {p(P,H) : P=1..p}1 :- H=1..h."
                                           "1 {p(P,H) : H=1..h}1 :- P=1..p.");
             ctl.ground({{"pigeon", {Number(6), Number(5)}}});
             auto conf = ctl.configuration();
             conf["stats"] = "2";
-            REQUIRE(ctl.solve(MCB(models)).is_unsatisfiable());
+            REQUIRE(test_solve(ctl.solve(), models).is_unsatisfiable());
             std::vector<std::string> keys_root;
             auto stats = ctl.statistics();
             std::copy(stats.keys().begin(), stats.keys().end(), std::back_inserter(keys_root));
@@ -128,12 +136,37 @@ TEST_CASE("solving", "[clingo]") {
             }
             REQUIRE(nloop == 1);
         }
+        SECTION("set_statistics") {
+            ctl.ground({{"base", {}}});
+            struct H : Clingo::SolveEventHandler {
+                void on_statistics(Clingo::UserStatistics step, Clingo::UserStatistics accu) override {
+                    auto map = step.add_subkey("map", StatisticsType::Map);
+                    map.add_subkey("x", StatisticsType::Value).set_value(1);
+                    map.add_subkey("y", StatisticsType::Value).set_value(2);
+                    map = accu.add_subkey("map", StatisticsType::Map);
+                    map.add_subkey("x", StatisticsType::Value).set_value(3);
+                    map.add_subkey("y", StatisticsType::Value).set_value(4);
+                }
+            } handler;
+            REQUIRE(test_solve(ctl.solve(Clingo::LiteralSpan{}, &handler), models).is_satisfiable());
+            auto stats = ctl.statistics();
+            REQUIRE(stats["user_step.map"].type() == StatisticsType::Map);
+            REQUIRE(stats["user_step.map.x"].type() == StatisticsType::Value);
+            REQUIRE(stats["user_step.map.y"].type() == StatisticsType::Value);
+            REQUIRE(stats["user_step.map.x"].value() == 1);
+            REQUIRE(stats["user_step.map.y"].value() == 2);
+            REQUIRE(stats["user_accu.map"].type() == StatisticsType::Map);
+            REQUIRE(stats["user_accu.map.x"].type() == StatisticsType::Value);
+            REQUIRE(stats["user_accu.map.y"].type() == StatisticsType::Value);
+            REQUIRE(stats["user_accu.map.x"].value() == 3);
+            REQUIRE(stats["user_accu.map.y"].value() == 4);
+        }
         SECTION("configuration") {
             auto conf = ctl.configuration();
             std::vector<std::string> keys_root;
             std::copy(conf.keys().begin(), conf.keys().end(), std::back_inserter(keys_root));
             std::sort(keys_root.begin(), keys_root.end());
-            std::vector<std::string> keys_check = { "asp", "configuration", "learn_explicit", "parse_ext", "sat_prepro", "share", "solve", "solver", "stats", "tester" };
+            std::vector<std::string> keys_check = { "asp", "configuration", "learn_explicit", "parse_ext", "parse_maxsat", "sat_prepro", "share", "solve", "solver", "stats", "tester" };
             REQUIRE(keys_root == keys_check);
             REQUIRE(conf["solve"]["models"].is_value());
             conf["solve"]["models"] = "2";
@@ -152,22 +185,32 @@ TEST_CASE("solving", "[clingo]") {
             CHECK(conf["solver"]["heuristic"].value() == "berkmin,100");
             ctl.add("base", {}, "{a; b; c}.");
             ctl.ground({{"base", {}}});
-            REQUIRE(ctl.solve(MCB(models)).is_satisfiable());
+            REQUIRE(test_solve(ctl.solve(), models).is_satisfiable());
             REQUIRE(models.size() == 2);
         }
         SECTION("backend") {
             // NOTE: ground has to be called before using the backend
-            auto backend = ctl.backend();
-            literal_t a = backend.add_atom(), b = backend.add_atom();
-            backend.rule(true, {atom_t(a)}, {});
-            backend.rule(false, {atom_t(b)}, {-a});
-            ctl.solve(MCB(models));
+            literal_t a, b;
+            {
+                auto backend = ctl.backend();
+                a = backend.add_atom();
+                b = backend.add_atom();
+                backend.rule(true, {atom_t(a)}, {});
+                backend.rule(false, {atom_t(b)}, {-a});
+            }
+            test_solve(ctl.solve(), models);
             REQUIRE(models == (ModelVec{{},{}}));
-            backend.assume({a});
-            ctl.solve(MCB(models));
+            {
+                auto backend = ctl.backend();
+                backend.assume({a});
+            }
+            test_solve(ctl.solve(), models);
             REQUIRE(models == (ModelVec{{}}));
-            backend.minimize(1, {{a,1},{b,1}});
-            ctl.solve(MCB(models));
+            {
+                auto backend = ctl.backend();
+                backend.minimize(1, {{a,1},{b,1}});
+            }
+            test_solve(ctl.solve(), models);
             REQUIRE(ctl.statistics()["summary.costs"].size() == 1);
             REQUIRE(ctl.statistics()["summary.costs"][size_t(0)] == 1);
             REQUIRE(ctl.statistics()["summary.call"] == 2);
@@ -175,40 +218,75 @@ TEST_CASE("solving", "[clingo]") {
             // void heuristic(atom_t atom, HeuristicType type, int bias, unsigned priority, LitSpan condition);
         }
         SECTION("backend-project") {
-            ctl.configuration()["solve.project"] = "1";
-            auto backend = ctl.backend();
-            atom_t a = backend.add_atom(), b = backend.add_atom();
-            backend.rule(true, {a, b}, {});
-            backend.project({a});
-            ctl.solve(MCB(models));
+            ctl.configuration()["solve.project"] = "auto";
+            {
+                auto backend = ctl.backend();
+                atom_t a = backend.add_atom(), b = backend.add_atom();
+                backend.rule(true, {a, b}, {});
+                backend.project({a});
+            }
+            test_solve(ctl.solve(), models);
             REQUIRE(models == (ModelVec{{},{}}));
         }
         SECTION("backend-external") {
-            auto backend = ctl.backend();
-            atom_t a = backend.add_atom();
-            backend.external(a, ExternalType::Free);
-            ctl.solve(MCB(models));
-            REQUIRE(models == (ModelVec{{},{}}));
-            backend.external(a, ExternalType::Release);
-            ctl.solve(MCB(models));
+            {
+                auto backend = ctl.backend();
+                atom_t a = backend.add_atom();
+                backend.external(a, ExternalType::Free);
+                test_solve(ctl.solve(), models);
+                REQUIRE(models == (ModelVec{{},{}}));
+                backend.external(a, ExternalType::Release);
+            }
+            test_solve(ctl.solve(), models);
             REQUIRE(models == (ModelVec{{}}));
         }
         SECTION("backend-acyc") {
-            auto backend = ctl.backend();
-            atom_t a = backend.add_atom(), b = backend.add_atom();
-            backend.rule(true, {a, b}, {});
-            backend.acyc_edge(1, 2, {literal_t(a)});
-            backend.acyc_edge(2, 1, {literal_t(b)});
-            ctl.solve(MCB(models));
+            {
+                auto backend = ctl.backend();
+                atom_t a = backend.add_atom(), b = backend.add_atom();
+                backend.rule(true, {a, b}, {});
+                backend.acyc_edge(1, 2, {literal_t(a)});
+                backend.acyc_edge(2, 1, {literal_t(b)});
+            }
+            test_solve(ctl.solve(), models);
             REQUIRE(models == (ModelVec{{},{},{}}));
         }
         SECTION("backend-weight-rule") {
-            auto backend = ctl.backend();
-            atom_t a = backend.add_atom(), b = backend.add_atom();
-            backend.rule(true, {a, b}, {});
-            backend.weight_rule(false, {}, 1, {{literal_t(a),1}, {literal_t(b),1}});
-            ctl.solve(MCB(models));
+            {
+                auto backend = ctl.backend();
+                atom_t a = backend.add_atom(), b = backend.add_atom();
+                backend.rule(true, {a, b}, {});
+                backend.weight_rule(false, {}, 1, {{literal_t(a),1}, {literal_t(b),1}});
+            }
+            test_solve(ctl.solve(), models);
             REQUIRE(models == (ModelVec{{}}));
+        }
+        SECTION("backend-add-atom") {
+            auto a = [](int x) { return Function("a", {Number(x)}); };
+            auto b = [](int x) { return Function("b", {Number(x)}); };
+            auto e = [](int x) { return Function("e", {Number(x)}); };
+            {
+                auto backend = ctl.backend();
+                auto aa = backend.add_atom(a(2));
+                auto ab = backend.add_atom(b(1));
+                backend.rule(true, {aa}, {});
+                backend.rule(true, {ab}, {});
+            }
+
+            ctl.ground({{"base", {}}});
+
+            {
+                auto backend = ctl.backend();
+                auto ae = backend.add_atom(e(3));
+                backend.rule(false, {ae}, {});
+            }
+            test_solve(ctl.solve(), models);
+            REQUIRE(models == (ModelVec{{ a(2), b(1), e(3) }, { a(2), e(3) }, { b(1), e(3) }, { e(3) }}));
+
+            ctl.ground({{"multi", {}}});
+            test_solve(ctl.solve(), models);
+            REQUIRE(models == (ModelVec{{ a(2), b(1), e(3) }, { a(2), e(3) }, { b(1), e(3) }, { e(3) }}));
+
         }
         SECTION("optimize") {
             ctl.add("base", {}, "2 {a; b; c; d}.\n"
@@ -219,16 +297,15 @@ TEST_CASE("solving", "[clingo]") {
             ctl.ground({{"base", {}}});
             SymbolVector model;
             CostVector optimum;
-            REQUIRE(ctl.solve([&optimum, &model](Model m) {
+            for (auto &m : ctl.solve()) {
                 model = m.symbols();
                 optimum = m.cost();
-                return true;
-            }).is_satisfiable());
+            }
             REQUIRE(model == SymbolVector({ Id("a"), Id("d") }));
             REQUIRE(optimum == (CostVector{7,5}));
             REQUIRE(messages.empty());
         }
-#if defined(WITH_THREADS) && WITH_THREADS == 1
+#if defined(CLASP_HAS_THREADS) && CLASP_HAS_THREADS == 1
         SECTION("async") {
             ctl.add("base", {}, "{a}.");
             ctl.ground({{"base", {}}});
@@ -241,7 +318,8 @@ TEST_CASE("solving", "[clingo]") {
         SECTION("model") {
             ctl.add("base", {}, "a. $x $= 1. #show b.");
             ctl.ground({{"base", {}}});
-            REQUIRE(ctl.solve([](Model m) {
+            bool sat = false;
+            for (auto &m : ctl.solve()) {
                 REQUIRE(m.type() == ModelType::StableModel);
                 REQUIRE(m.symbols(ShowType::Atoms) == (SymbolVector{Id("a")}));
                 REQUIRE(m.symbols(ShowType::Terms) == (SymbolVector{Id("b")}));
@@ -250,23 +328,22 @@ TEST_CASE("solving", "[clingo]") {
                 REQUIRE(m.symbols(ShowType::Atoms | ShowType::Complement).size() == 0);
                 REQUIRE( m.contains(Id("a")));
                 REQUIRE(!m.contains(Id("b")));
-                return true;
-            }).is_satisfiable());
+                sat = true;
+            };
+            REQUIRE(sat);
             REQUIRE(messages.empty());
         }
         SECTION("model-add-clause") {
             ctl.add("base", {}, "1{a;b}1.");
             ctl.ground({{"base", {}}});
             int n = 0;
-            auto ret = ctl.solve([&n](Model m) {
+            for (auto &m : ctl.solve()) {
                 REQUIRE(m.type() == ModelType::StableModel);
-                REQUIRE(m.context().thread_id() == 0);
+                REQUIRE(m.thread_id() == 0);
                 ++n;
                 char const *name = m.contains(Id("a")) ? "b" : "a";
                 m.context().add_clause({{Id(name), false}});
-                return true;
-            });
-            REQUIRE(ret.is_satisfiable());
+            };
             REQUIRE(n == 1);
             REQUIRE(messages.empty());
         }
@@ -275,13 +352,11 @@ TEST_CASE("solving", "[clingo]") {
             ctl.add("base", {}, "a.");
             ctl.ground({{"base", {}}});
             int n = 0;
-            auto ret = ctl.solve([&n](Model m) {
+            for (auto &m : ctl.solve()) {
                 REQUIRE(m.type() == ModelType::CautiousConsequences);
-                REQUIRE(m.context().thread_id() == 0);
+                REQUIRE(m.thread_id() == 0);
                 ++n;
-                return true;
-            });
-            REQUIRE(ret.is_satisfiable());
+            }
             REQUIRE(n == 1);
             REQUIRE(messages.empty());
         }
@@ -290,24 +365,22 @@ TEST_CASE("solving", "[clingo]") {
             ctl.add("base", {}, "{a}. #minimize { 1:a }.");
             ctl.ground({{"base", {}}});
             int n = 0;
-            auto ret = ctl.solve([&n](Model m) {
+            for (auto &m : ctl.solve()) {
                 REQUIRE(m.type() == ModelType::StableModel);
-                REQUIRE(m.context().thread_id() == 0);
+                REQUIRE(m.thread_id() == 0);
                 if (m.optimality_proven()) {
                     REQUIRE(m.number() == 1);
                     REQUIRE(m.cost() == (CostVector{0}));
                     ++n;
                 }
-                return true;
-            });
-            REQUIRE(ret.is_satisfiable());
+            }
             REQUIRE(n == 1);
             REQUIRE(messages.empty());
         }
         SECTION("assumptions") {
             ctl.add("base", {}, "{a;b;c}.");
             ctl.ground({{"base", {}}});
-            REQUIRE(ctl.solve(MCB(models), {{Id("a"), false}, {Id("b"), true}}).is_satisfiable());
+            REQUIRE(test_solve(ctl.solve({{Id("a"), true}, {Id("b"), false}}), models).is_satisfiable());
             REQUIRE(models == (ModelVec{{Id("a")}, {Id("a"), Id("c")}}));
             REQUIRE(messages.empty());
         }
@@ -364,7 +437,7 @@ TEST_CASE("solving", "[clingo]") {
                 }
             }
             REQUIRE(count == 2);
-            REQUIRE(ctl.solve(MCB(models), {{Id("p"), false}, {Id("q"), false}}).is_satisfiable());
+            REQUIRE(test_solve(ctl.solve({{Id("p"), true}, {Id("q"), true}}), models).is_satisfiable());
             REQUIRE(models == ModelVec({{Id("p"), Id("q")}}));
             REQUIRE(atoms.size() == 0);
             ctl.add("next", {}, "&b {} = 42.");
@@ -380,7 +453,7 @@ TEST_CASE("solving", "[clingo]") {
         SECTION("symbolic atoms") {
             ctl.add("base", {}, "p(1). {p(2)}. #external p(3). q.");
             ctl.ground({{"base", {}}});
-            REQUIRE(ctl.solve(MCB(models)).is_satisfiable());
+            REQUIRE(test_solve(ctl.solve(), models).is_satisfiable());
             REQUIRE(messages.empty());
             auto atoms = ctl.symbolic_atoms();
             Symbol p1 = Function("p", {Number(1)}), p2 = Function("p", {Number(2)}), p3 = Function("p", {Number(3)}), q = Id("q");
@@ -402,14 +475,14 @@ TEST_CASE("solving", "[clingo]") {
             ctl.add("acid", {"k"}, "#external query(k).");
             ctl.ground({{"base", {}}});
             ctl.assign_external(Function("query", {Number(0)}), TruthValue::True);
-            REQUIRE(ctl.solve(MCB(models)).is_satisfiable());
+            REQUIRE(test_solve(ctl.solve(), models).is_satisfiable());
             REQUIRE(models == (ModelVec{{Function("query", {Number(0)})}}));
             REQUIRE(messages.empty());
 
             ctl.ground({{"acid", {Number(1)}}});
             ctl.release_external(Function("query", {Number(0)}));
             ctl.assign_external(Function("query", {Number(1)}), TruthValue::Free);
-            REQUIRE(ctl.solve(MCB(models)).is_satisfiable());
+            REQUIRE(test_solve(ctl.solve(), models).is_satisfiable());
             REQUIRE(models == (ModelVec{{}, {Function("query", {Number(1)})}}));
             REQUIRE(messages.empty());
         }
@@ -419,14 +492,16 @@ TEST_CASE("solving", "[clingo]") {
                 ctl.add("base", {}, "a.");
                 ctl.ground({{"base", {}}});
                 {
-                    auto iter = ctl.solve_iteratively();
-                    MCB mcb(models);
-                    SECTION("c++") { for (auto m : iter) { mcb(m); }; }
-                    SECTION("java") { while (Model m = iter.next()) { mcb(m); }; }
+                    auto iter = ctl.solve();
+                    {
+                        MCB mcb(models);
+                        SECTION("c++") { for (auto &m : iter) { mcb(m); }; }
+                        SECTION("java") { while (auto &m = iter.next()) { mcb(m); }; }
+                    }
                     REQUIRE(models == ModelVec{{Id("a")}});
                     REQUIRE(iter.get().is_satisfiable());
                 }
-                REQUIRE(ctl.solve(MCB(models)).is_satisfiable());
+                REQUIRE(test_solve(ctl.solve(), models).is_satisfiable());
                 REQUIRE(models == ModelVec{{Id("a")}});
                 REQUIRE(messages.empty());
             }
@@ -434,7 +509,7 @@ TEST_CASE("solving", "[clingo]") {
         SECTION("logging") {
             ctl.add("base", {}, "a(1+a).");
             ctl.ground({{"base", {}}});
-            REQUIRE(ctl.solve(MCB(models)).is_satisfiable());
+            REQUIRE(test_solve(ctl.solve(), models).is_satisfiable());
             REQUIRE(models == ModelVec{{}});
             REQUIRE(messages == MessageVec({{WarningCode::OperationUndefined, "<block>:1:3-6: info: operation undefined:\n  (1+a)\n"}}));
         }
@@ -442,18 +517,18 @@ TEST_CASE("solving", "[clingo]") {
             ctl.add("base", {}, "{p;q}.");
             ctl.ground({{"base", {}}});
             ctl.use_enumeration_assumption(false);
-            REQUIRE(ctl.solve(MCB(models)).is_satisfiable());
+            REQUIRE(test_solve(ctl.solve(), models).is_satisfiable());
             REQUIRE(models.size() == 4);
-            REQUIRE(ctl.solve(MCB(models)).is_satisfiable());
+            REQUIRE(test_solve(ctl.solve(), models).is_satisfiable());
             REQUIRE(models.size() <= 4);
         }
         SECTION("use_enumeration_assumption") {
             ctl.add("base", {}, "{p;q}.");
             ctl.ground({{"base", {}}});
             ctl.use_enumeration_assumption(false);
-            REQUIRE(ctl.solve(MCB(models)).is_satisfiable());
+            REQUIRE(test_solve(ctl.solve(), models).is_satisfiable());
             REQUIRE(models.size() == 4);
-            REQUIRE(ctl.solve(MCB(models)).is_satisfiable());
+            REQUIRE(test_solve(ctl.solve(), models).is_satisfiable());
             REQUIRE(models.size() <= 4);
         }
         SECTION("cleanup") {
@@ -461,11 +536,11 @@ TEST_CASE("solving", "[clingo]") {
             ctl.ground({{"base", {}}});
             auto dom = ctl.symbolic_atoms();
             REQUIRE(dom.find(Id("a")) != dom.end());
-            REQUIRE(ctl.solve(MCB(models)).is_satisfiable());
+            REQUIRE(test_solve(ctl.solve(), models).is_satisfiable());
             REQUIRE(models.size() == 1);
             ctl.cleanup();
             REQUIRE(dom.find(Id("a")) == dom.end());
-            REQUIRE(ctl.solve(MCB(models)).is_satisfiable());
+            REQUIRE(test_solve(ctl.solve(), models).is_satisfiable());
             REQUIRE(models.size() == 1);
         }
         SECTION("const") {
@@ -475,7 +550,7 @@ TEST_CASE("solving", "[clingo]") {
             REQUIRE(ctl.get_const("a") == Number(10));
             REQUIRE(ctl.get_const("b") == Id("b"));
         }
-#if defined(WITH_THREADS) && WITH_THREADS == 1
+#if defined(CLASP_HAS_THREADS) && CLASP_HAS_THREADS == 1
         SECTION("async and cancel") {
             static int n = 0;
             if (++n < 3) { // workaround for some bug with catch
@@ -510,7 +585,7 @@ TEST_CASE("solving", "[clingo]") {
                     messages.emplace_back(WarningCode::OperationUndefined, oss.str());
                 }
             });
-            REQUIRE(ctl.solve(MCB(models)).is_satisfiable());
+            REQUIRE(test_solve(ctl.solve(), models).is_satisfiable());
             REQUIRE(models == ModelVec({{Function("a", {Number(2)}), Function("a", {Number(3)}), Function("a", {Number(11)}), Function("a", {Number(12)}), Function("a", {Number(21)}), Function("a", {Number(22)})}}));
             REQUIRE(messages == MessageVec({{WarningCode::OperationUndefined, "invalid call: f/0 at <block>:1:22-26"}}));
         }
@@ -524,9 +599,66 @@ TEST_CASE("solving", "[clingo]") {
             ctl.register_observer(obs);
             ctl.add("base", {}, "a :- not a.");
             ctl.ground({{"base", {}}});
-            REQUIRE(ctl.solve(MCB(models)).is_unsatisfiable());
+            REQUIRE(test_solve(ctl.solve(), models).is_unsatisfiable());
             REQUIRE(models == ModelVec({}));
             REQUIRE(trail == std::vector<std::string>({"IP: incremental", "BS", "R: 1:-~1", "ES"}));
+        }
+        SECTION("theory data bug") {
+            struct Observer : Clingo::GroundProgramObserver {
+                Observer(std::vector<id_t> &atoms) : atoms_{atoms} { }
+                void theory_atom(id_t atom_id_or_zero, id_t , IdSpan ) override {
+                    atoms_.emplace_back(atom_id_or_zero);
+                }
+                std::vector<id_t> &atoms_;
+            };
+
+            std::vector<id_t> atoms;
+            Observer o{atoms};
+            ctl.register_observer(o);
+            ctl.add("base",{}, R"(#theory csp {
+                                   dom_term {};
+                                   &dom/0 : dom_term, any}.)");
+            ctl.add("base",{}, "&dom {0}. &dom {1}.");
+            ctl.add("acid",{}, "&dom {1}. &dom {2}.");
+            REQUIRE(atoms == std::vector<id_t>({}));
+            ctl.ground({{"base", {}}});
+            REQUIRE(atoms == std::vector<id_t>({1, 2}));
+            ctl.ground({{"acid", {}}});
+            REQUIRE(atoms == std::vector<id_t>({1, 2, 3}));
+            ctl.cleanup();
+            REQUIRE(atoms == std::vector<id_t>({1, 2, 3}));
+            { ctl.backend(); }
+            REQUIRE(atoms == std::vector<id_t>({1, 2, 3}));
+            { ctl.backend(); }
+            REQUIRE(atoms == std::vector<id_t>({1, 2, 3}));
+        }
+        SECTION("events") {
+            ctl.add("base", {}, "{a}.");
+            ctl.ground({{"base", {}}});
+            int m = 0;
+            int f = 0;
+            bool goon = true;
+            SECTION("stop") { goon = false; }
+            SECTION("goon") { goon = true; }
+            struct EH : Clingo::SolveEventHandler {
+                EH(bool goon, int &m, int &f) : goon(goon), m(m), f(f) { }
+                bool on_model(Model &) override {
+                    REQUIRE(f == 0);
+                    ++m;
+                    return goon;
+                }
+                void on_finish(SolveResult) override {
+                    ++f;
+                }
+                bool goon;
+                int &m;
+                int &f;
+            };
+            EH handler{goon, m, f};
+            auto handle = ctl.solve(LiteralSpan{}, &handler);
+            REQUIRE(test_solve(std::move(handle), models).is_satisfiable());
+            REQUIRE(m == (goon ? 2 : 1));
+            REQUIRE(f == 1);
         }
     }
 }

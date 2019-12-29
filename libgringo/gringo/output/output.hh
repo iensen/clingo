@@ -1,27 +1,30 @@
-// {{{ GPL License
+// {{{ MIT License
 
-// This file is part of gringo - a grounder for logic programs.
-// Copyright (C) 2013  Roland Kaminski
+// Copyright 2017 Roland Kaminski
 
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal in the Software without restriction, including without limitation the
+// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+// sell copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
 
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+// IN THE SOFTWARE.
 
 // }}}
 
 #ifndef _GRINGO_OUTPUT_OUTPUT_HH
 #define _GRINGO_OUTPUT_OUTPUT_HH
 
-#include <gringo/control.hh>
 #include <gringo/output/types.hh>
 #include <gringo/output/statements.hh>
 #include <gringo/output/theory.hh>
@@ -60,6 +63,7 @@ struct OutputOptions {
     bool        reifySteps = false;
 };
 
+using Assumptions = Potassco::LitSpan;
 class OutputBase {
 public:
     OutputBase(Potassco::TheoryData &data, OutputPredicates &&outPreds, std::ostream &out, OutputFormat format = OutputFormat::INTERMEDIATE, OutputOptions opts = OutputOptions());
@@ -69,10 +73,10 @@ public:
     std::pair<Id_t, Id_t> simplify(AssignmentLookup assignment);
     void incremental();
     void output(Statement &x);
-    void flush();
     void init(bool incremental);
     void beginStep();
-    void endStep(bool solve, Logger &log);
+    void endGround(Logger &log);
+    void endStep(Assumptions const &ass);
     void checkOutPreds(Logger &log);
     SymVec atoms(unsigned atomset, IsTrueLookup lookup) const;
     std::pair<PredicateDomain::Iterator, PredicateDomain*> find(Symbol val);
@@ -82,9 +86,20 @@ public:
     Rule &tempRule(bool choice) { return tempRule_.reset(choice); }
     SymVec &tempVals() { tempVals_.clear(); return tempVals_; }
     LitVec &tempLits() { tempLits_.clear(); return tempLits_; }
-    Backend *backend();
+    Backend *backend_();
+    // also prepares the domains to be able to add to them
+    Backend *backend(Logger &logger);
     void registerObserver(UBackend prg, bool replace);
     void reset(bool resetData);
+    Id_t addAtom(Symbol sym, bool *added = nullptr) {
+        auto &atm = *data.add(sym.sig()).define(sym).first;
+        if (!atm.hasUid()) {
+            atm.setUid(data.newAtom());
+            if (added) { *added = true; }
+        }
+        else if (added) { *added = false; }
+        return atm.uid();
+    }
 private:
     UAbstractOutput fromFormat(std::ostream &out, OutputFormat format, OutputOptions opts);
     UAbstractOutput fromBackend(UBackend &&out, OutputOptions opts);

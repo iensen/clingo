@@ -1,20 +1,24 @@
-// {{{ GPL License
+// {{{ MIT License
 
-// This file is part of gringo - a grounder for logic programs.
-// Copyright (C) 2013  Roland Kaminski
+// Copyright 2017 Roland Kaminski
 
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal in the Software without restriction, including without limitation the
+// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+// sell copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
 
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+// IN THE SOFTWARE.
 
 // }}}
 
@@ -22,7 +26,6 @@
 #include "gringo/input/program.hh"
 #include "gringo/ground/program.hh"
 #include "gringo/output/output.hh"
-#include "gringo/scripts.hh"
 
 #include "tests/tests.hh"
 
@@ -45,14 +48,18 @@ std::string ground(std::string const &str, std::initializer_list<std::string> fi
     Input::Program prg;
     Defines defs;
     Gringo::Test::TestGringoModule module;
-    Scripts scripts(module);
-    Input::NongroundProgramBuilder pb{ scripts, prg, out, defs };
-    Input::NonGroundParser ngp{ pb };
+    Gringo::Test::TestContext context;
+    Input::NongroundProgramBuilder pb{ context, prg, out, defs };
+    bool incmode;
+    Input::NonGroundParser ngp{ pb, incmode };
     ngp.pushStream("-", gringo_make_unique<std::stringstream>(str), module);
     ngp.parse(module);
     prg.rewrite(defs, module);
-    Program gPrg(prg.toGround(out.data, module));
-    gPrg.ground(scripts, out, module);
+    Program gPrg(prg.toGround({Sig{"base", 0, false}}, out.data, module));
+    Parameters params;
+    params.add("base", {});
+    gPrg.ground(params, context, out, module);
+    out.endStep({});
 
     std::string line;
     std::vector<std::string> res;
@@ -894,7 +901,7 @@ TEST_CASE("ground-instantiation", "[ground]") {
             "a.\n"
             "b.\n"
             "c.\n"
-            "e;d.\n"
+            "d;e.\n"
             "f:-d,e.\n" == ground(
                 "a.\n"
                 "b.\n"
@@ -934,7 +941,7 @@ TEST_CASE("ground-instantiation", "[ground]") {
             "out(q(1)):-q(1).\n" "out(q(2)):-q(2).\n" "out(q(3)):-q(3).\n"
             "out(r(3)):-r(3).\n" "out(r(4)):-r(4).\n" "out(r(5)):-r(5).\n"
             "p(1).\n" "p(2).\n" "p(3).\n" "p(4).\n" "p(5).\n"
-            "r(3);r(4);r(5);q(1);q(2);q(3);not r(3);not r(4);not r(5).\n" == ground(
+            "q(1);q(2);q(3);r(3);r(4);r(5);not r(3);not r(4);not r(5).\n" == ground(
                 "p(1..5).\n"
                 "q(X) : p(X), X <= 3; r(X) : p(X), X >= 3; not r(X) : p(X), X >= 3.\n"
                 "out(q(X)):-q(X).\n"
@@ -983,7 +990,7 @@ TEST_CASE("ground-instantiation", "[ground]") {
             "strategic(6);strategic(5).\n"
             "strategic(6);strategic(6).\n" == ground(
                 strategicA1() +
-                "strategic(X1); strategic(X2) :- produced_by(P,X1,X2).\n"
+                "strategic(X2); strategic(X1) :- produced_by(P,X1,X2).\n"
                 "strategic(W) :- controlled_by(W,X1,X2,X3), strategic(X1), strategic(X2), strategic(X3).\n", {"strategic("}));
     }
 
@@ -1107,6 +1114,14 @@ TEST_CASE("ground-instantiation", "[ground]") {
                 "p(1..4).\n"
                 "-q(X):-not not -q(X), p(X).\n"
                 " q(X):-not not  q(X), p(X).\n"));
+    }
+    SECTION("two aggregates") {
+        REQUIRE(
+            "p:-#count{0,a:a}=0.\n"
+            "p:-#count{0,a:a}=1,1<=#count{0,b:b}.\n"
+            "{a;b}.\n" == ground(
+                "{a;b}.\n"
+                "p :- X = { a }, X { b }.\n"));
     }
 
     SECTION("tuple") {

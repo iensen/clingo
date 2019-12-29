@@ -1,20 +1,24 @@
-// {{{ GPL License
+// {{{ MIT License
 
-// This file is part of gringo - a grounder for logic programs.
-// Copyright (C) 2013  Roland Kaminski
+// Copyright 2017 Roland Kaminski
 
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal in the Software without restriction, including without limitation the
+// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+// sell copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
 
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+// IN THE SOFTWARE.
 
 // }}}
 
@@ -38,9 +42,10 @@ std::string iground(std::string in, int last = 3) {
     Output::OutputBase out(td, {}, ss, OutputFormat::INTERMEDIATE);
     Input::Program prg;
     Defines defs;
-    Scripts scripts(module);
-    Input::NongroundProgramBuilder pb(scripts, prg, out, defs);
-    Input::NonGroundParser parser(pb);
+    Gringo::Test::TestContext context;
+    Input::NongroundProgramBuilder pb(context, prg, out, defs);
+    bool incmode;
+    Input::NonGroundParser parser(pb, incmode);
     parser.pushStream("-", gringo_make_unique<std::stringstream>(in), module.logger);
     Models models;
     parser.parse(module.logger);
@@ -54,21 +59,24 @@ std::string iground(std::string in, int last = 3) {
             Ground::Parameters params;
             params.add("base", {});
             out.beginStep();
-            prg.toGround(out.data, module.logger).ground(params, scripts, out, true, module.logger);
+            prg.toGround({Sig{"base", 0, false}}, out.data, module.logger).ground(params, context, out, module.logger);
+            out.endStep({});
             out.reset(true);
         }
         for (int i=1; i < last; ++i) {
             Ground::Parameters params;
             params.add("step", {NUM(i)});
             out.beginStep();
-            prg.toGround(out.data, module.logger).ground(params, scripts, out, true, module.logger);
+            prg.toGround({Sig{"step", 1, false}}, out.data, module.logger).ground(params, context, out, module.logger);
+            out.endStep({});
             out.reset(true);
         }
         {
             Ground::Parameters params;
             params.add("last", {});
             out.beginStep();
-            prg.toGround(out.data, module.logger).ground(params, scripts, out, true, module.logger);
+            prg.toGround({Sig{"last", 0, false}}, out.data, module.logger).ground(params, context, out, module.logger);
+            out.endStep({});
             out.reset(true);
         }
     }
@@ -148,13 +156,13 @@ TEST_CASE("output-incremental", "[output]") {
             "0\n"
             "1 0 1 2 0 0\n"
             "4 4 r(1) 0\n"
-            "4 4 p(1) 1 -1\n"
             "4 4 q(1) 1 -1\n"
+            "4 4 p(1) 1 -1\n"
             "0\n"
             "1 0 1 3 0 0\n"
             "4 4 r(2) 0\n"
-            "4 4 p(2) 1 -1\n"
             "4 4 q(2) 1 -1\n"
+            "4 4 p(2) 1 -1\n"
             "0\n"
             "4 4 last 1 -1\n"
             "0\n" == iground(
@@ -194,32 +202,32 @@ TEST_CASE("output-incremental", "[output]") {
             "0\n"
             "1 0 1 1 0 0\n"
             "1 1 1 2 0 1 3\n"
-            "1 1 1 3 0 1 4\n"
+            "1 1 1 3 0 0\n"
             "1 1 1 4 0 1 5\n"
-            "1 1 1 5 0 0\n"
-            "1 1 1 6 0 1 7\n"
+            "1 1 1 5 0 1 6\n"
+            "1 1 1 6 0 0\n"
             "1 1 1 7 0 1 8\n"
-            "1 1 1 8 0 0\n"
+            "1 1 1 8 0 1 9\n"
             "1 1 1 9 0 1 10\n"
             "1 1 1 10 0 0\n"
-            "4 4 up=0 1 2\n"
-            "4 4 up=1 2 3 -2\n"
-            "4 4 up=2 2 4 -3\n"
-            "4 4 up=3 2 5 -4\n"
-            "4 4 up=4 1 -5\n"
-            "4 4 lo=1 1 6\n"
-            "4 4 lo=2 2 7 -6\n"
-            "4 4 lo=3 2 8 -7\n"
-            "4 4 lo=4 1 -8\n"
-            "4 4 ib=1 1 9\n"
-            "4 4 ib=2 2 10 -9\n"
-            "4 4 ib=3 1 -10\n"
+            "4 4 ib=1 1 2\n"
+            "4 4 ib=2 2 3 -2\n"
+            "4 4 ib=3 1 -3\n"
+            "4 4 lo=1 1 4\n"
+            "4 4 lo=2 2 5 -4\n"
+            "4 4 lo=3 2 6 -5\n"
+            "4 4 lo=4 1 -6\n"
+            "4 4 up=0 1 7\n"
+            "4 4 up=1 2 8 -7\n"
+            "4 4 up=2 2 9 -8\n"
+            "4 4 up=3 2 10 -9\n"
+            "4 4 up=4 1 -10\n"
             "4 7 step(1) 0\n"
             "0\n"
             "1 0 1 11 0 0\n"
-            "1 0 0 0 1 -5\n"
-            "1 0 0 0 1 6\n"
-            "1 0 0 0 2 -9 10\n"
+            "1 0 0 0 2 -2 3\n"
+            "1 0 0 0 1 4\n"
+            "1 0 0 0 1 -10\n"
             "4 7 step(2) 0\n"
             "0\n"
             "4 6 last=1 0\n"

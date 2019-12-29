@@ -1,20 +1,24 @@
-// {{{ GPL License
+// {{{ MIT License
 
-// This file is part of gringo - a grounder for logic programs.
-// Copyright (C) 2013  Roland Kaminski
+// Copyright 2017 Roland Kaminski
 
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal in the Software without restriction, including without limitation the
+// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+// sell copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
 
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+// IN THE SOFTWARE.
 
 // }}}
 
@@ -26,6 +30,7 @@
 #include <gringo/intervals.hh>
 #include <gringo/output/aggregates.hh>
 #include <gringo/output/theory.hh>
+#include <gringo/backend.hh>
 
 namespace Gringo { namespace Output {
 
@@ -336,9 +341,9 @@ public:
     : value_(value)
     , fun_(fun) { values_.emplace_back(getNeutral(fun)); }
     AssignmentAggregateData(AssignmentAggregateData &&) = default;
-    AssignmentAggregateData(AssignmentAggregateData const &) = default;
+    AssignmentAggregateData(AssignmentAggregateData const &) = delete;
     AssignmentAggregateData &operator=(AssignmentAggregateData &&) = default;
-    AssignmentAggregateData &operator=(AssignmentAggregateData const &) = default;
+    AssignmentAggregateData &operator=(AssignmentAggregateData const &) = delete;
     ~AssignmentAggregateData() noexcept = default;
     operator Symbol const &() const { return value_; }
     void accumulate(DomainData &data, Location const &loc, SymVec const &tuple, LitVec &cond, Logger &log);
@@ -440,9 +445,9 @@ class ConjunctionAtom {
 public:
     using Elements = UniqueVec<ConjunctionElement, std::hash<Symbol>, std::equal_to<Symbol>>;
     ConjunctionAtom(ConjunctionAtom &&) = default;
-    ConjunctionAtom(ConjunctionAtom const &) = default;
+    ConjunctionAtom(ConjunctionAtom const &) = delete;
     ConjunctionAtom &operator=(ConjunctionAtom &&) = default;
-    ConjunctionAtom &operator=(ConjunctionAtom const &) = default;
+    ConjunctionAtom &operator=(ConjunctionAtom const &) = delete;
     ~ConjunctionAtom() noexcept = default;
     // {{{2 Atom interface
     ConjunctionAtom(Symbol value)
@@ -515,9 +520,9 @@ using DisjointElemSet = UniqueVec<std::pair<TupleId, DisjointElemVec>, HashFirst
 class DisjointAtom {
 public:
     DisjointAtom(DisjointAtom &&) = default;
-    DisjointAtom(DisjointAtom const &) = default;
+    DisjointAtom(DisjointAtom const &) = delete;
     DisjointAtom &operator=(DisjointAtom &&) noexcept = default;
-    DisjointAtom &operator=(DisjointAtom const &) = default;
+    DisjointAtom &operator=(DisjointAtom const &) = delete;
     ~DisjointAtom() noexcept = default;
     // {{{2 Atom interface
     DisjointAtom(Symbol value)
@@ -596,9 +601,9 @@ class DisjunctionAtom {
 public:
     using Elements = UniqueVec<DisjunctionElement, std::hash<Symbol>, std::equal_to<Symbol>>;
     DisjunctionAtom(DisjunctionAtom &&) = default;
-    DisjunctionAtom(DisjunctionAtom const &) = default;
+    DisjunctionAtom(DisjunctionAtom const &) = delete;
     DisjunctionAtom &operator=(DisjunctionAtom &&) = default;
-    DisjunctionAtom &operator=(DisjunctionAtom const &) = default;
+    DisjunctionAtom &operator=(DisjunctionAtom const &) = delete;
     ~DisjunctionAtom() noexcept = default;
     // {{{2 Atom interface
     DisjunctionAtom(Symbol value)
@@ -655,9 +660,9 @@ private:
 class HeadAggregateAtom {
 public:
     HeadAggregateAtom(HeadAggregateAtom &&) = default;
-    HeadAggregateAtom(HeadAggregateAtom const &) = default;
+    HeadAggregateAtom(HeadAggregateAtom const &) = delete;
     HeadAggregateAtom &operator=(HeadAggregateAtom &&) = default;
-    HeadAggregateAtom &operator=(HeadAggregateAtom const &) = default;
+    HeadAggregateAtom &operator=(HeadAggregateAtom const &) = delete;
     ~HeadAggregateAtom() noexcept = default;
     // {{{2 Atom interface
     HeadAggregateAtom(Symbol value)
@@ -774,65 +779,7 @@ public:
         return sig_;
     }
 
-    std::pair<Id_t, Id_t> cleanup(AssignmentLookup assignment, Mapping &map) {
-        Id_t facts = 0;
-        Id_t deleted = 0;
-        Id_t oldOffset = 0;
-        Id_t newOffset = 0;
-        reset();
-        //std::cerr << "cleaning " << *sig_ << std::endl;
-        atoms_.erase([&](PredicateAtom &atom) {
-            atom.setGeneration(0);
-            atom.unmarkDelayed();
-            if (!atom.defined()) {
-                ++deleted;
-                ++oldOffset;
-                return true;
-            }
-            if (atom.hasUid()) {
-                auto value = assignment(atom.uid());
-                if (!value.first) {
-                    switch (value.second) {
-                        case Potassco::Value_t::True: {
-                            // NOTE: externals cannot become facts here
-                            //       because they might get new definitions while grounding
-                            //       because there is no distinction between true and weak true
-                            //       these definitions might be skipped if a weak true external
-                            //       is made a fact here
-                            if (!atom.fact()) { ++facts; }
-                            atom.setFact(true);
-                            break;
-                        }
-                        case Potassco::Value_t::False: {
-                            ++deleted;
-                            ++oldOffset;
-                            return true;
-                        }
-                        default: { break; }
-                    }
-                }
-            }
-            //std::cerr << "  mapping " << static_cast<Symbol>(atom) << " from " << oldOffset << " to " << newOffset << std::endl;
-            map.add(oldOffset, newOffset);
-            ++oldOffset;
-            ++newOffset;
-            return false;
-        });
-        /*
-        std::cerr << "remaining atoms: ";
-        for (auto &atom : atoms_) {
-            std::cerr << " " << static_cast<Symbol>(atom) << "=" << (atoms_.find(static_cast<Symbol>(atom)) != atoms_.end()) << "/" << atom.generation() << "/" << atom.defined() << "/" << atom.delayed();
-        }
-        std::cerr << std::endl;
-        */
-        delayed_.clear();
-        generation_ = 1;
-        initOffset_ = atoms_.size();
-        initDelayedOffset_ = 0;
-        incOffset_ = map.bound(incOffset_);
-        showOffset_ = map.bound(showOffset_);
-        return {facts, deleted};
-    }
+    std::pair<Id_t, Id_t> cleanup(AssignmentLookup assignment, Mapping &map);
 private:
     Sig sig_;
     SizeType incOffset_ = 0;
@@ -1119,7 +1066,16 @@ private:
 
 // {{{1 declaration of DomainData
 
-class DomainData : private Gringo::TheoryData {
+enum class TheoryTermType : int {
+    Tuple = 0,
+    List = 1,
+    Set = 2,
+    Function = 3,
+    Number = 4,
+    Symbol = 5
+};
+
+class DomainData {
     using Tuples = UniqueVecVec<2, Symbol>;
     using Clauses = UniqueVecVec<2, LiteralId>;
     using Formulas = UniqueVecVec<2, std::pair<Id_t,Id_t>, value_hash<std::pair<Id_t,Id_t>>>;
@@ -1127,7 +1083,7 @@ class DomainData : private Gringo::TheoryData {
 public:
     DomainData(Potassco::TheoryData &theory)
     : theory_(theory) { }
-    DomainData(DomainData &&) = default;
+    DomainData(DomainData &&) = delete;
     DomainData& operator=(DomainData&&) = delete;
     ~DomainData() noexcept = default;
 
@@ -1187,7 +1143,7 @@ public:
     }
     std::pair<Id_t,Id_t> clause(LitVec &cond) {
         sort_unique(cond);
-        return {clauses_.push(cond).first, cond.size()};
+        return {clauses_.push(cond).first, numeric_cast<Id_t>(cond.size())};
     }
     std::pair<Id_t,Id_t> clause(LitVec &&cond) { return clause(cond); }
     IteratorRange<LitVec::const_iterator> clause(std::pair<Id_t, Id_t> pos) { return clause(pos.first, pos.second); }
@@ -1197,7 +1153,7 @@ public:
     }
     std::pair<Id_t,Id_t> formula(Formula &&lits) {
         sort_unique(lits);
-        return {formulas_.push(lits).first, lits.size()};
+        return {formulas_.push(lits).first, numeric_cast<Id_t>(lits.size())};
     }
     IteratorRange<Formula::iterator> formula(Id_t id, Id_t size) {
         auto it = formulas_.at(id, size);
@@ -1222,9 +1178,6 @@ public:
     bool canSimplify() const {
         return domains_.empty() && clauses_.empty() && formulas_.empty() && theory_.empty();
     }
-    Gringo::TheoryData const &theoryInterface() const {
-        return *this;
-    }
     BackendAtomVec &tempAtoms() {
         hd_.clear();
         return hd_;
@@ -1238,23 +1191,22 @@ public:
         return wb_;
     }
 
-private:
-    Gringo::TheoryData::TermType termType(Id_t) const override;
-    int termNum(Id_t value) const override;
-    char const *termName(Id_t value) const override;
-    Potassco::IdSpan termArgs(Id_t value) const override;
-    Potassco::IdSpan elemTuple(Id_t value) const override;
-    Potassco::LitSpan elemCond(Id_t value) const override;
-    Potassco::Lit_t elemCondLit(Id_t value) const override;
-    Potassco::IdSpan atomElems(Id_t value) const override;
-    Potassco::Id_t atomTerm(Id_t value) const override;
-    bool atomHasGuard(Id_t value) const override;
-    Potassco::Lit_t atomLit(Id_t value) const override;
-    std::pair<char const *, Id_t> atomGuard(Id_t value) const override;
-    Potassco::Id_t numAtoms() const override;
-    std::string termStr(Id_t value) const override;
-    std::string elemStr(Id_t value) const override;
-    std::string atomStr(Id_t value) const override;
+    TheoryTermType termType(Id_t) const;
+    int termNum(Id_t value) const;
+    char const *termName(Id_t value) const;
+    Potassco::IdSpan termArgs(Id_t value) const;
+    Potassco::IdSpan elemTuple(Id_t value) const;
+    Potassco::LitSpan elemCond(Id_t value) const;
+    Potassco::Lit_t elemCondLit(Id_t value) const;
+    Potassco::IdSpan atomElems(Id_t value) const;
+    Potassco::Id_t atomTerm(Id_t value) const;
+    bool atomHasGuard(Id_t value) const;
+    Potassco::Lit_t atomLit(Id_t value) const;
+    std::pair<char const *, Id_t> atomGuard(Id_t value) const;
+    Potassco::Id_t numAtoms() const;
+    std::string termStr(Id_t value) const;
+    std::string elemStr(Id_t value) const;
+    std::string atomStr(Id_t value) const;
 
 private:
     BackendAtomVec hd_;

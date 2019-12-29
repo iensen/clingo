@@ -1,20 +1,24 @@
-// {{{ GPL License
+// {{{ MIT License
 
-// This file is part of gringo - a grounder for logic programs.
-// Copyright (C) 2013  Roland Kaminski
+// Copyright 2017 Roland Kaminski
 
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal in the Software without restriction, including without limitation the
+// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+// sell copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
 
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+// IN THE SOFTWARE.
 
 // }}}
 
@@ -26,6 +30,9 @@
 #include <climits>
 #include <sstream>
 #include <functional>
+#ifdef _MSC_VER
+#pragma warning (disable : 4503) // decorated name length exceeded
+#endif
 
 namespace Gringo { namespace Test {
 
@@ -71,7 +78,7 @@ TEST_CASE("term", "[base]") {
 
     auto rewriteArithmetics = [&](UTerm &&x) -> std::string {
         Term::ArithmeticsMap vec;
-        vec.emplace_back();
+        vec.emplace_back(gringo_make_unique<Term::LevelMap>());
         AuxGen gen;
         UTerm y(x->rewriteArithmetics(vec, gen));
         return to_string(std::make_pair(y ? std::move(y) : std::move(x), std::move(vec)));
@@ -93,7 +100,7 @@ TEST_CASE("term", "[base]") {
         for(auto &term : unpool(x)) {
             SimplifyState elemState(state);
             Term::ArithmeticsMap arith;
-            arith.emplace_back();
+            arith.emplace_back(gringo_make_unique<Term::LevelMap>());
             term->simplify(elemState, true, false, log).update(term);
             Term::replace(term, term->rewriteArithmetics(arith, elemState.gen));
             res.emplace_back(std::move(term), std::move(elemState.dots), std::move(arith));
@@ -105,7 +112,7 @@ TEST_CASE("term", "[base]") {
         SimplifyState state;
         Term::ArithmeticsMap arith;
         Term::VarSet set;
-        arith.emplace_back();
+        arith.emplace_back(gringo_make_unique<Term::LevelMap>());
         x->simplify(state, true, false, log).update(x);
         Term::replace(x, x->rewriteArithmetics(arith, state.gen));
         x->bind(set);
@@ -171,7 +178,7 @@ TEST_CASE("term", "[base]") {
         REQUIRE(*gterm(lin("X",2,3)) != *gterm(lin("X",1,3)));
         REQUIRE(*gterm(lin("X",2,3)) != *gterm(lin("X",2,2)));
         REQUIRE(*gterm(var("X")) == *gterm(var("X")));
-        REQUIRE(*gterm(fun("f", var("X"), var("X"))) == *gterm(fun("f", var("X"), var("X", 1)))); // Note: all levels=0
+        REQUIRE(*gterm(fun("f", var("X"), var("X"))) != *gterm(fun("f", var("X"), var("X", 1)))); // Note: all levels=0
         REQUIRE(*gterm(var("X")) == *gterm(var("Y"))); // Note: intended
         REQUIRE(*gterm(fun("f", val(NUM(1)), val(NUM(2)))) == *gterm(fun("f", val(NUM(1)), val(NUM(2)))));
         REQUIRE(*gterm(fun("f", val(NUM(1)), val(NUM(2)))) != *gterm(fun("g", val(NUM(1)), val(NUM(2)))));
@@ -239,6 +246,8 @@ TEST_CASE("term", "[base]") {
         REQUIRE("(0*X)" == to_string(simplify(binop(BinOp::MUL, val(NUM(0)), var("X")))));
         REQUIRE("#undefined" == to_string(simplify(binop(BinOp::ADD, fun("f", val(NUM(1))), var("X")))));
         REQUIRE("#undefined" == to_string(simplify(fun("f", binop(BinOp::ADD, val(NUM(1)), val(ID("a")))))));
+        REQUIRE("#undefined" == to_string(simplify(fun("f", binop(BinOp::MOD, val(NUM(1)), val(NUM(0)))))));
+        REQUIRE("#undefined" == to_string(simplify(fun("f", binop(BinOp::DIV, val(NUM(1)), val(NUM(0)))))));
         REQUIRE("X" == to_string(simplify(binop(BinOp::SUB, val(NUM(1)), binop(BinOp::SUB, val(NUM(1)), var("X"))))));
         REQUIRE("(1*X+1)" == to_string(simplify(binop(BinOp::SUB, val(NUM(1)), unop(UnOp::NEG, var("X"))))));
         REQUIRE("3" == to_string(simplify(binop(BinOp::ADD, val(NUM(1)), val(NUM(2))))));
@@ -252,13 +261,25 @@ TEST_CASE("term", "[base]") {
 
     SECTION("undefined") {
         bool undefined = false;
+
         REQUIRE(NUM(0) == binop(BinOp::POW, val(ID("a")), val(NUM(1)))->eval(undefined, log));
         REQUIRE(undefined);
         REQUIRE("dummy:1:1: info: operation undefined:\n  (a**1)\n" == log.messages().back());
+
         undefined = false;
         REQUIRE(NUM(0) == unop(UnOp::NOT, val(ID("a")))->eval(undefined, log));
         REQUIRE(undefined);
         REQUIRE("dummy:1:1: info: operation undefined:\n  (~a)\n" == log.messages().back());
+
+        undefined = false;
+        REQUIRE(NUM(0) == binop(BinOp::POW, val(NUM(0)), val(NUM(-2)))->eval(undefined, log));
+        REQUIRE(undefined);
+        REQUIRE("dummy:1:1: info: operation undefined:\n  (0**-2)\n" == log.messages().back());
+
+        undefined = false;
+        REQUIRE(NUM(0) == binop(BinOp::MOD, val(NUM(10)), val(NUM(0)))->eval(undefined, log));
+        REQUIRE(undefined);
+        REQUIRE("dummy:1:1: info: operation undefined:\n  (10\\0)\n" == log.messages().back());
     }
 
     SECTION("project") {

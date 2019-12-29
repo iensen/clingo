@@ -1,20 +1,24 @@
-// {{{ GPL License
+// {{{ MIT License
 
-// This file is part of gringo - a grounder for logic programs.
-// Copyright (C) 2013  Roland Kaminski
+// Copyright 2017 Roland Kaminski
 
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal in the Software without restriction, including without limitation the
+// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+// sell copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
 
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+// IN THE SOFTWARE.
 
 // }}}
 
@@ -22,7 +26,6 @@
 #include "gringo/ground/binders.hh"
 #include "gringo/ground/types.hh"
 #include "gringo/logger.hh"
-#include "gringo/scripts.hh"
 #include <cmath>
 #include <cstring>
 
@@ -46,7 +49,7 @@ struct RangeBinder : Binder {
         }
         else {
             if (!undefined) {
-                GRINGO_REPORT(log, clingo_warning_operation_undefined)
+                GRINGO_REPORT(log, Warnings::OperationUndefined)
                     << (range.first->loc() + range.second->loc()) << ": info: interval undefined:\n"
                     << "  " << *range.first << ".." << *range.second << "\n";
             }
@@ -85,7 +88,7 @@ struct RangeMatcher : Binder {
         }
         else {
             if (!undefined) {
-                GRINGO_REPORT(log, clingo_warning_operation_undefined)
+                GRINGO_REPORT(log, Warnings::OperationUndefined)
                     << (range.first->loc() + range.second->loc()) << ": info: interval undefined:\n"
                     << "  " << *range.first << ".." << *range.second << "\n";
             }
@@ -108,8 +111,8 @@ struct RangeMatcher : Binder {
 // {{{ declaration of ScriptBinder
 
 struct ScriptBinder : Binder {
-    ScriptBinder(Scripts &scripts, UTerm &&assign, ScriptLiteralShared &shared)
-        : scripts(scripts)
+    ScriptBinder(Context &context, UTerm &&assign, ScriptLiteralShared &shared)
+        : context(context)
         , assign(std::move(assign))
         , shared(shared) { }
     IndexUpdater *getUpdater() override { return nullptr; }
@@ -118,7 +121,7 @@ struct ScriptBinder : Binder {
         bool undefined = false;
         for (auto &x : std::get<1>(shared)) { args.emplace_back(x->eval(undefined, log)); }
         if (!undefined) {
-            matches = scripts.call(assign->loc(), std::get<0>(shared), Potassco::toSpan(args), log);
+            matches = context.call(assign->loc(), std::get<0>(shared), Potassco::toSpan(args), log);
         }
         else { matches = {}; }
         current = matches.begin();
@@ -136,7 +139,7 @@ struct ScriptBinder : Binder {
     }
     virtual ~ScriptBinder() { }
 
-    Scripts             &scripts;
+    Context             &context;
     UTerm                assign;
     ScriptLiteralShared &shared;
     SymVec               matches;
@@ -242,7 +245,7 @@ void PredicateLiteral::setType(OccurrenceType x)  { type = x; }
 OccurrenceType PredicateLiteral::getType() const  { return type; }
 BodyOcc::DefinedBy &PredicateLiteral::definedBy() { return defs; }
 void PredicateLiteral::checkDefined(LocSet &done, SigSet const &edb, UndefVec &undef) const {
-    if (!auxiliary_ && defs.empty() && done.find(repr->loc()) == done.end() && edb.find(repr->getSig()) == edb.end()) {
+    if (!auxiliary_ && defs.empty() && done.find(repr->loc()) == done.end() && edb.find(repr->getSig()) == edb.end() && domain.empty()) {
         // accumulate warnings in array of printables ..
         done.insert(repr->loc());
         undef.emplace_back(repr->loc(), repr.get());
@@ -354,16 +357,16 @@ void Literal::collectImportant(Term::VarSet &vars) {
 // }}}
 // {{{ definition of *Literal::index
 
-UIdx RangeLiteral::index(Scripts &, BinderType, Term::VarSet &bound) {
+UIdx RangeLiteral::index(Context &, BinderType, Term::VarSet &bound) {
     if (assign->bind(bound)) { return gringo_make_unique<RangeBinder>(get_clone(assign), range); }
     else                     { return gringo_make_unique<RangeMatcher>(*assign, range); }
 }
-UIdx ScriptLiteral::index(Scripts &scripts, BinderType, Term::VarSet &bound) {
+UIdx ScriptLiteral::index(Context &context, BinderType, Term::VarSet &bound) {
     UTerm clone(assign->clone());
     clone->bind(bound);
-    return gringo_make_unique<ScriptBinder>(scripts, std::move(clone), shared);
+    return gringo_make_unique<ScriptBinder>(context, std::move(clone), shared);
 }
-UIdx RelationLiteral::index(Scripts &, BinderType, Term::VarSet &bound) {
+UIdx RelationLiteral::index(Context &, BinderType, Term::VarSet &bound) {
     if (std::get<0>(shared) == Relation::EQ) {
         UTerm clone(std::get<1>(shared)->clone());
         VarTermVec occBound;
@@ -371,10 +374,10 @@ UIdx RelationLiteral::index(Scripts &, BinderType, Term::VarSet &bound) {
     }
     return gringo_make_unique<RelationMatcher>(shared);
 }
-UIdx PredicateLiteral::index(Scripts &, BinderType type, Term::VarSet &bound) {
+UIdx PredicateLiteral::index(Context &, BinderType type, Term::VarSet &bound) {
     return make_binder(domain, naf, *repr, offset, type, isRecursive(), bound, 0);
 }
-UIdx ProjectionLiteral::index(Scripts &, BinderType type, Term::VarSet &bound) {
+UIdx ProjectionLiteral::index(Context &, BinderType type, Term::VarSet &bound) {
     assert(bound.empty());
     assert(type == BinderType::ALL || type == BinderType::NEW);
     return make_binder(domain, naf, *repr, offset, type, isRecursive(), bound, initialized_ ? domain.incOffset() : 0);
@@ -466,7 +469,7 @@ void CSPLiteral::collectImportant(Term::VarSet &vars) {
     for (auto &occ : x) { vars.emplace(occ.first->name); }
 }
 
-UIdx CSPLiteral::index(Scripts &, BinderType, Term::VarSet &) {
+UIdx CSPLiteral::index(Context &, BinderType, Term::VarSet &) {
     // NOTE: if the literal is auxiliary it can simply always match
     return gringo_make_unique<CSPLiteralMatcher>(terms_);
 }

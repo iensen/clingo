@@ -1,26 +1,31 @@
-// {{{ GPL License
+// {{{ MIT License
 
-// This file is part of gringo - a grounder for logic programs.
-// Copyright Roland Kaminski
+// Copyright 2017 Roland Kaminski
 
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to
+// deal in the Software without restriction, including without limitation the
+// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+// sell copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
 
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+// IN THE SOFTWARE.
 
 // }}}
 
 #include "tests.hh"
 #include <iostream>
 #include <fstream>
+#include <sstream>
 
 namespace Clingo { namespace Test {
 
@@ -59,7 +64,7 @@ ModelVec solve(char const *prg, PartSpan parts = {{"base", {}}}) {
         parse_program(prg, [&b](AST::Statement const &stm) { b.add(stm); });
     });
     ctl.ground(parts);
-    ctl.solve(MCB(models));
+    test_solve(ctl.solve(), models);
     return models;
 }
 
@@ -88,7 +93,9 @@ TEST_CASE("parse-ast", "[clingo]") {
     SECTION("statement") {
         REQUIRE(parse("a.") == "a.");
         REQUIRE(parse("a:-b.") == "a :- b.");
-        REQUIRE(parse("#const a=10.") == "#const a = 10. [default]");
+        REQUIRE(parse("#const a=10. [override]") == "#const a = 10. [override]");
+        REQUIRE(parse("#const a=10. [default]") == "#const a = 10.");
+        REQUIRE(parse("#const a=10.") == "#const a = 10.");
         REQUIRE(parse("#show a/1.") == "#show a/1.");
         REQUIRE(parse("#show $a/1.") == "#show $a/1.");
         REQUIRE(parse("#show a : b.") == "#show a : b.");
@@ -97,8 +104,9 @@ TEST_CASE("parse-ast", "[clingo]") {
         REQUIRE(parse("#minimize{ 1:b }.") == ":~ b. [1@0]");
         REQUIRE(parse("#script (python) 42 #end.") == "#script (python) 42 #end.");
         REQUIRE(parse("#program p(k).") == "#program p(k).");
-        REQUIRE(parse("#external p(k).") == "#external p(k).");
-        REQUIRE(parse("#external p(k) : a, b.") == "#external p(k) : a; b.");
+        REQUIRE(parse("#external p(k).") == "#external p(k). [false]");
+        REQUIRE(parse("#external p(k). [true]") == "#external p(k). [true]");
+        REQUIRE(parse("#external p(k) : a, b.") == "#external p(k) : a; b. [false]");
         REQUIRE(parse("#edge (u,v) : a, b.") == "#edge (u,v) : a; b.");
         REQUIRE(parse("#heuristic a : b, c. [L@P,level]") == "#heuristic a : b; c. [L@P,level]");
         REQUIRE(parse("#project a : b.") == "#project a : b.");
@@ -125,7 +133,7 @@ TEST_CASE("parse-ast", "[clingo]") {
     SECTION("head literal") {
         REQUIRE(parse("a.") == "a.");
         REQUIRE(parse("a:b.") == "a : b.");
-        REQUIRE(parse("a:b,c;d.") == "d : ; a : b, c.");
+        REQUIRE(parse("a:b,c;d.") == "a : b, c; d : .");
         REQUIRE(parse("1{a:b,c;e}2.") == "1 <= { a : b, c; e :  } <= 2.");
         REQUIRE(parse("{a:b,c;e}2.") == "2 >= { a : b, c; e :  }.");
         REQUIRE(parse("1#min{1,2:h:b,c;1:e}2.") == "1 <= #min { 1,2 : h : b, c; 1 : e :  } <= 2.");
@@ -157,8 +165,10 @@ TEST_CASE("parse-ast", "[clingo]") {
         REQUIRE(parse("p((a^b)).") == "p((a^b)).");
         REQUIRE(parse("p(a..b).") == "p((a..b)).");
         REQUIRE(parse("p((),(1,),f(),f(1,2)).") == "p((),(1,),f,f(1,2)).");
-        REQUIRE(parse("p(a;b).") == "(p(a);p(b)).");
+        REQUIRE(parse("p(@f(a;b)).") == "p(@f(a;b)).");
+        REQUIRE(parse("p(a;b).") == "p(a;b).");
         REQUIRE(parse("p((a,;b)).") == "p(((a,);b)).");
+        REQUIRE(parse("p(((a,);b)).") == "p(((a,);b)).");
         REQUIRE(parse("1 $+ 3 $* $x $+ 7 $< 2 $< 3.") == "1$+3$*$x$+7$<2$<3.");
     }
     SECTION("theory terms") {

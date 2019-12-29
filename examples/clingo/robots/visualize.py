@@ -1,6 +1,9 @@
 #!/usr/bin/env python
 import clingo
-import Tkinter
+try:
+    import Tkinter
+except ImportError:
+    import tkinter as Tkinter
 
 # {{{1 class Board
 
@@ -116,7 +119,7 @@ class Solver:
         for x in self.__assign:
             self.__prg.assign_external(x, True)
         self.__solution = None
-        self.__future = self.__prg.solve_async(on_model=self.__on_model)
+        self.__future = self.__prg.solve(on_model=self.__on_model, async_=True)
 
     def busy(self):
         if self.__future is None:
@@ -124,7 +127,7 @@ class Solver:
         if self.__future.wait(0):
             if self.__solution is None:
                 self.__next()
-                self.__future = self.__prg.solve_async(on_model=self.__on_model)
+                self.__future = self.__prg.solve(on_model=self.__on_model, async_=True)
                 return True
             else:
                 self.__future = None
@@ -421,7 +424,8 @@ class Main:
         self.__canvas.connect_robot_event(self.robot_event)
         self.__canvas.connect_solve_event(self.solve_event)
 
-    def target_event(self, event, (x, y)):
+    def target_event(self, event, pos):
+        x, y = pos
         if self.__board.current_target is None:
             if event == "enter":
                 self.__canvas.highlight(x, y, True)
@@ -444,7 +448,8 @@ class Main:
             self.__canvas.update_target(self.__board)
         self.__canvas.enable_solve(self.__board, "enabled" if not won and self.__board.solution is None else "disabled")
 
-    def robot_event(self, event, (r, x, y, dx, dy)):
+    def robot_event(self, event, pos):
+        r, x, y, dx, dy = pos
         if event == "enter":
             self.__canvas.highlight_direction(x+dx, y+dy, dx, dy, True)
         elif event == "leave":
